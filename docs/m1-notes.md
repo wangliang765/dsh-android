@@ -82,3 +82,22 @@ browse 选择器起点 = `homedir()`（安卓上被 DshService 设为 files/）�
 启动时建 `files/storage -> /storage/emulated/0` 符号链接（bridgePhoneStorage，失败不致命）。
 选择器对符号链接做 stat 探测、目录即显示可进入行；进入后面包屑展开完整链可跳转。
 RPC 实证：`host.listDirectory files/` 出现 storage 行；列 storage 返回真实手机目录与全链 crumbs。
+
+## 自定义供应商 400 "developer role"（2026-08-25）
+
+现象：vsllm 中转 + qwen3.8-max 思考档 xhigh，首轮即 400
+`developer is not one of ['system','assistant','user','tool','function']`。
+
+链条：pi-ai `openai-completions.js` 里
+`useDeveloperRole = model.reasoning && compat.supportsDeveloperRole`；
+已知厂商域名（deepseek.com 等）在 detectCompat 的 isNonStandard 名单内强制 system，
+而未知中转 baseUrl **乐观默认 supportsDeveloperRole=true**；自研 per-model 思考强度功能
+（cb295b72eb）给该模型置 reasoning → 系统提示词以 developer 角色发出 → 后端拒收。
+PC 端"没事"只是因为没开思考档位，坑是跨平台的。
+
+修复（纯配置，上游一等字段）：settings.yaml 模型条目加
+`compat: { supportsDeveloperRole: false }`——角色回 system，思考不受影响
+（reasoning_effort 由独立的 supportsReasoningEffort 控制）。真机复测 turn completed。
+
+遗留两条：① UI 编辑器里关此开关未落盘 settings.yaml，需查 ui-settings-models 保存链路；
+② 自研特性宜改为"未知端点默认 false"，显式声明才 true。
