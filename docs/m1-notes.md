@@ -74,3 +74,11 @@ tool-bash/tool-fs 等 win32 门控行在 android 上天然落 POSIX 分支，无
 （isError:false）；`session.create {cwd:'/sdcard/Download'}` 会话中 touch/printf/ls/cat 全通，
 文件落在 `/storage/emulated/0/Download`。GUI 侧入口 = 首页 "Choose workspace" 工作区选择器
 （directory-picker browse 变体），配合 MANAGE_EXTERNAL_STORAGE 可绑定任意手机文件夹。
+
+## 工作区选择器的手机存储桥（2026-08-25）
+
+browse 选择器起点 = `homedir()`（安卓上被 DshService 设为 files/），且客户端 DirectoryBrowser
+把家目录以上的面包屑折叠成"家"图标、家目录层无向上一级 → 手机存储不可达。修法：DshService
+启动时建 `files/storage -> /storage/emulated/0` 符号链接（bridgePhoneStorage，失败不致命）。
+选择器对符号链接做 stat 探测、目录即显示可进入行；进入后面包屑展开完整链可跳转。
+RPC 实证：`host.listDirectory files/` 出现 storage 行；列 storage 返回真实手机目录与全链 crumbs。

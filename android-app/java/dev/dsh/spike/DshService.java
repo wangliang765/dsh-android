@@ -120,6 +120,7 @@ public class DshService extends Service {
             File filesDir = getFilesDir();
             File runtimeDir = new File(filesDir, "runtime");
             extractAssets(runtimeDir);
+            bridgePhoneStorage(filesDir);
 
             ArrayList<String> argv = new ArrayList<>();
             argv.add(new File(getApplicationInfo().nativeLibraryDir, "libnode_dsh.so").getAbsolutePath());
@@ -212,6 +213,37 @@ public class DshService extends Service {
         }
         writeFile(marker, fingerprint);
         appendTail("extraction done");
+    }
+
+    /**
+     * Bridges shared storage into the directory-picker's browse root. The GUI
+     * workspace dialog lists homedir() (= filesDir here) and its crumb trail
+     * collapses everything above home, so /storage is unreachable by climbing.
+     * A `files/storage` symlink makes shared storage one visible, enterable
+     * row; past it the picker shows the full ancestry with jump crumbs.
+     * Requires MANAGE_EXTERNAL_STORAGE for entry (Settings grant); the link
+     * itself always creates fine.
+     */
+    private void bridgePhoneStorage(File filesDir) {
+        File link = new File(filesDir, "storage");
+        File target = new File("/storage/emulated/0");
+        try {
+            boolean valid = false;
+            try {
+                valid = link.exists()
+                    && target.getCanonicalPath().equals(link.getCanonicalPath());
+            } catch (IOException ignored) {
+                // Unreadable/stale link: re-create below.
+            }
+            if (!valid) {
+                link.delete();
+                Files.createSymbolicLink(link.toPath(), target.toPath());
+                Log.i(TAG, "bridged phone storage: " + link + " -> " + target);
+            }
+        } catch (Exception e) {
+            // Non-fatal: private-dir workspaces keep working; log for diagnosis.
+            Log.w(TAG, "phone storage bridge failed", e);
+        }
     }
 
     /**
