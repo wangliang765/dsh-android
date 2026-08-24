@@ -13,6 +13,7 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -21,6 +22,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.nio.file.Files;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -134,7 +136,13 @@ public class DshService extends Service {
             Map<String, String> env = builder.environment();
             String nativeDir = getApplicationInfo().nativeLibraryDir;
             env.put("LD_LIBRARY_PATH", nativeDir);
-            env.put("PATH", nativeDir + ":/system/bin:/system/xbin");
+            // The model's shell commands run through `bash -c`; stock Android
+            // ships no bash binary (/system/bin has only toybox sh). Expose the
+            // bundled termux bash (jniLibs libbash.so) on PATH via a symlink:
+            // execve resolves through it into nativeLibraryDir, the one
+            // W^X-exempt location on targetSdk >= 29, so SELinux allows it.
+            File binDir = ensureBashOnPath(filesDir, nativeDir);
+            env.put("PATH", binDir.getAbsolutePath() + ":" + nativeDir + ":/system/bin:/system/xbin");
             env.put("HOME", filesDir.getAbsolutePath());
             env.put("DSH_HOME", new File(filesDir, ".dsh").getAbsolutePath());
             env.put("DSH_AGENTS_HOME", new File(filesDir, ".agents").getAbsolutePath());
@@ -204,6 +212,33 @@ public class DshService extends Service {
         }
         writeFile(marker, fingerprint);
         appendTail("extraction done");
+    }
+
+    /**
+     * Ensures files/bin/bash exists as a symlink to the bundled termux bash
+     * (libbash.so inside nativeLibraryDir) and returns the bin dir for PATH.
+     * Re-links when the install path changed (each update gets a new
+     * /data/app/~~random/ directory).
+     */
+    private File ensureBashOnPath(File filesDir, String nativeDir) throws Exception {
+        File binDir = new File(filesDir, "bin");
+        if (!binDir.isDirectory() && !binDir.mkdirs()) {
+            throw new IllegalStateException("cannot create app bin dir: " + binDir);
+        }
+        File link = new File(binDir, "bash");
+        File target = new File(nativeDir, "libbash.so");
+        boolean valid = false;
+        try {
+            valid = link.exists() && target.getAbsolutePath().equals(link.getCanonicalPath());
+        } catch (IOException ignored) {
+            // Stale or unreadable link: fall through and re-create it.
+        }
+        if (!valid) {
+            link.delete();
+            Files.createSymbolicLink(link.toPath(), target.toPath());
+            appendTail("linked bash -> " + target);
+        }
+        return binDir;
     }
 
     private void unzip(InputStream input, File targetDir) throws Exception {

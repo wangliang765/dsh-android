@@ -55,4 +55,22 @@ tool-bash/tool-fs 等 win32 门控行在 android 上天然落 POSIX 分支，无
 
 - `--expose-internals` 必需：boot 后 profile-boot 无条件挂 watch-only HMR（配置热重载契约），其服务要求 loader internals。
 - patch 经 `.dsh/profiles/web/cordis.patch.yml` 生效（web 子命令禁 --patch）；loader 会把编译产物写在该目录旁。
-- 原生依赖 stub 化清单：node-pty、sharp（模块可加载、调用即抛）；koffi 保持真身（win32 FFI 路径 PC 冒烟用，安卓上 sandbox 行已禁不触达）。
+- 原生依赖 stub 化清单：node-pty、sharp、koffi（模块可加载、原生调用即抛）。
+
+## rc.2 真机回归两连修（2026-08-25 实证）
+
+1. **koffi 顶层 import 炸启动**：上游 rc.2 给 dsh-subprocess-local 加了 Win32 进程树检查器
+   （windows-inspector.js），`lib/index.js:121` 在**模块作用域**急切执行 `koffi.pointer("void")`，
+   koffi 预编译绑定无 bionic/arm64 → loader entry `subprocess` 加载失败、整树拒绝启动
+   （"Cannot find the native Koffi module"）。修法：androidize_payload.py 的 koffi stub 不能用
+   惰性抛错版——类型描述符构造器（pointer/struct/array）返回哑 token，只有 load()/open() 抛错。
+2. **spawn bash ENOENT**：bash-local 硬编码 `['bash','-c',cmd]`，原厂安卓 /system/bin 无 bash。
+   自带 termux bash 就是 jniLibs 的 `libbash.so`，但名字不在 PATH 上。修法：DshService 启动时建
+   `files/bin/bash -> <nativeLibraryDir>/libbash.so` 符号链接并前插 PATH；execve 穿过链接落在
+   PM 管理的 lib 目录（targetSdk≥29 唯一豁免执行的位置），SELinux 放行。每次覆盖安装后安装路径
+   变化，ensureBashOnPath 按 canonical path 比对自动重链。
+
+真机验证证据（RMX3888，API 会话直驱）：bash `pwd` → `/data/data/dev.dsh.spike/files/workspace`
+（isError:false）；`session.create {cwd:'/sdcard/Download'}` 会话中 touch/printf/ls/cat 全通，
+文件落在 `/storage/emulated/0/Download`。GUI 侧入口 = 首页 "Choose workspace" 工作区选择器
+（directory-picker browse 变体），配合 MANAGE_EXTERNAL_STORAGE 可绑定任意手机文件夹。
