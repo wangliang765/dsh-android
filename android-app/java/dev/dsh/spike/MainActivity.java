@@ -18,6 +18,8 @@ import android.webkit.WebViewClient;
 import android.widget.EditText;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 
 /** M1 shell: collect the API key, start the foreground runtime, show the GUI when ready. */
 public class MainActivity extends Activity {
@@ -105,8 +107,40 @@ public class MainActivity extends Activity {
         webView = new WebView(this);
         webView.getSettings().setJavaScriptEnabled(true);
         webView.getSettings().setDomStorageEnabled(true);
-        webView.setWebViewClient(new WebViewClient());
+        webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                injectMobileOverrides(view);
+            }
+        });
         return webView;
+    }
+
+    /**
+     * Idempotently injects the res/raw mobile CSS overrides into the page head.
+     * A style tag survives SPA re-renders, and onPageFinished fires again on
+     * every real navigation, so one guard-by-id check covers both paths. The
+     * overrides live entirely in this app (docs/m1-notes.md): upstream web
+     * bundles stay untouched, so following upstream releases needs no merge.
+     */
+    private void injectMobileOverrides(WebView view) {
+        try {
+            BufferedReader reader = new BufferedReader(new InputStreamReader(
+                getResources().openRawResource(R.raw.mobile_overrides), "UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line).append('\n');
+            }
+            reader.close();
+            String js = "(function(){if(document.getElementById('dsh-mobile-overrides'))return;"
+                + "var s=document.createElement('style');s.id='dsh-mobile-overrides';"
+                + "s.textContent=" + org.json.JSONObject.quote(sb.toString()) + ";"
+                + "document.head.appendChild(s);})()";
+            view.evaluateJavascript(js, null);
+        } catch (Exception e) {
+            Log.w(TAG, "mobile overrides injection failed", e);
+        }
     }
 
     static SharedPreferences prefs(Context context) {

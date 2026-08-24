@@ -18,22 +18,13 @@ foreach ($tool in "$Bt\aapt2.exe", "$Bt\d8.bat", "$Bt\zipalign.exe", "$Bt\apksig
   if (-not (Test-Path $tool)) { throw "missing build tool: $tool" }
 }
 
-New-Item -ItemType Directory -Force -Path "$Build\classes", "$Build\dex", $Dist | Out-Null
+New-Item -ItemType Directory -Force -Path "$Build\classes", "$Build\dex", "$Build\gen", $Dist | Out-Null
 
-Write-Host '== javac =='
-$javaSources = Get-ChildItem (Join-Path $App 'java') -Recurse -Filter '*.java' | ForEach-Object { $_.FullName }
-javac -classpath $PlatformJar -d "$Build\classes" $javaSources
-if ($LASTEXITCODE -ne 0) { throw "javac failed" }
-
-Write-Host '== d8 =='
-$classFiles = Get-ChildItem "$Build\classes" -Recurse -Filter '*.class' | ForEach-Object { $_.FullName }
-& "$Bt\d8.bat" --release --lib $PlatformJar --output "$Build\dex" $classFiles
-if ($LASTEXITCODE -ne 0) { throw "d8 failed" }
-
-Write-Host '== aapt2 link =='
+Write-Host '== aapt2 resources =='
 $Unsigned = "$Build\app-unsigned.apk"
 $linkArgs = @('link', '-o', $Unsigned, '-I', $PlatformJar,
-  '--manifest', (Join-Path $App 'AndroidManifest.xml'))
+  '--manifest', (Join-Path $App 'AndroidManifest.xml'),
+  '--java', "$Build\gen")
 if (Test-Path (Join-Path $App 'res')) {
   $ResZip = "$Build\res.zip"
   & "$Bt\aapt2.exe" compile --dir (Join-Path $App 'res') -o $ResZip
@@ -42,6 +33,17 @@ if (Test-Path (Join-Path $App 'res')) {
 }
 & "$Bt\aapt2.exe" @linkArgs
 if ($LASTEXITCODE -ne 0) { throw "aapt2 link failed" }
+
+Write-Host '== javac =='
+$javaSources = @(Get-ChildItem (Join-Path $App 'java') -Recurse -Filter '*.java' | ForEach-Object { $_.FullName })
+$genSources = @(Get-ChildItem "$Build\gen" -Recurse -Filter '*.java' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+javac -classpath $PlatformJar -d "$Build\classes" ($javaSources + $genSources)
+if ($LASTEXITCODE -ne 0) { throw "javac failed" }
+
+Write-Host '== d8 =='
+$classFiles = Get-ChildItem "$Build\classes" -Recurse -Filter '*.class' | ForEach-Object { $_.FullName }
+& "$Bt\d8.bat" --release --lib $PlatformJar --output "$Build\dex" $classFiles
+if ($LASTEXITCODE -ne 0) { throw "d8 failed" }
 
 Write-Host '== zip entries =='
 $Stuffed = "$Build\app-stuffed.apk"

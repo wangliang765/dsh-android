@@ -1,0 +1,60 @@
+/* dsh-android 移动端覆盖层（MainActivity 启动后幂等注入，见 docs/m1-notes.md）。
+ * 窄屏下设置弹窗全屏化：左侧分类栏变顶部横滑 Tab 条，内容区占满剩余空间。
+ * 只依赖语义类名（css-modules 哈希前缀后的稳定部分）与 role 结构；
+ * :has() 不支持的旧 WebView 上整块规则不生效，优雅退化为原布局。 */
+
+@supports selector(:has(*)) {
+  @media (max-width: 700px) {
+
+    /* ---- 弹窗全屏化：仅限带侧栏导航的设置面板 ---- */
+    [role="dialog"][aria-modal="true"]:has(> nav) {
+      flex-direction: column !important;
+      width: 100% !important;
+      max-width: none !important;
+      height: 100vh !important;
+      height: 100dvh !important;
+      max-height: none !important;
+      border-radius: 0 !important;
+    }
+
+    /* ---- 左侧分类栏 → 顶部横滑 Tab 条 ---- */
+    [role="dialog"][aria-modal="true"]:has(> nav) > nav {
+      flex-direction: row !important;
+      align-items: center !important;
+      gap: 8px !important;
+      width: auto !important;
+      padding: 8px 10px !important;
+      overflow-x: auto !important;
+      overflow-y: hidden !important;
+      border-bottom: 1px solid var(--dsw-alias-border-l2, #e5e7eb);
+      scrollbar-width: none !important;
+    }
+    [role="dialog"][aria-modal="true"]:has(> nav) > nav::-webkit-scrollbar {
+      display: none !important;
+    }
+    /* 标题行与 Tab 重复，窄屏隐藏 */
+    [role="dialog"][aria-modal="true"]:has(> nav) > nav > div:first-child {
+      display: none !important;
+    }
+    [role="dialog"][aria-modal="true"]:has(> nav) div[class*="a_navList"] {
+      flex-direction: row !important;
+      gap: 6px !important;
+    }
+    [role="dialog"][aria-modal="true"]:has(> nav) button[class*="a_navCell"] {
+      flex: none !important;
+      height: 34px !important;
+      padding: 5px 12px !important;
+      border-radius: 999px !important;
+      white-space: nowrap !important;
+    }
+
+    /* ---- 内容列占满剩余高度 ---- */
+    [role="dialog"][aria-modal="true"]:has(> nav) > div[class*="a_content"] {
+      flex: 1 1 0 !important;
+      min-height: 0 !important;
+    }
+    [role="dialog"][aria-modal="true"]:has(> nav) div[class*="a_options"] {
+      padding: 2px 14px 18px !important;
+    }
+  }
+}
