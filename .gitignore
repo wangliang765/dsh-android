@@ -1,0 +1,20 @@
+# ===== 可重建的二进制产物(一律不入库,由脚本重建)=====
+# APK 成品与签名中间件 → scripts\build-apk.ps1
+android-app/build/
+dist/
+# termux 下载物与解包产物 → runtime 相关脚本重新获取
+runtime/sysroot/
+runtime/debs/
+# 投放进 APK 的原生库(libnode_dsh.so 等,来自 debs 解包)
+runtime/jniLibs/
+# 上游装配产物 → scripts\rebuild-payload.ps1 全链路重建
+assembly/assets/
+assembly/tarballs/
+assembly/payload/
+# 上游仓库的 git worktree(rebuild-payload.ps1 每次重建,勿提交)
+assembly/worktree/
+
+# ===== 依赖与本地状态 =====
+node_modules/
+__pycache__/
+*.log

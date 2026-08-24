@@ -1,0 +1,166 @@
+[
+  {
+    "path": "libandroid-support.so",
+    "etype": "DYN",
+    "machine": 183,
+    "needed": [
+      "libc.so"
+    ],
+    "load_align_min": 16384
+  },
+  {
+    "path": "libbash.so",
+    "etype": "DYN",
+    "machine": 183,
+    "needed": [
+      "libandroid-support.so",
+      "libc.so",
+      "libdl.so",
+      "libiconv.so",
+      "libreadline.so"
+    ],
+    "load_align_min": 16384
+  },
+  {
+    "path": "libc++_shared.so",
+    "etype": "DYN",
+    "machine": 183,
+    "needed": [
+      "libc.so",
+      "libdl.so",
+      "libm.so"
+    ],
+    "load_align_min": 16384
+  },
+  {
+    "path": "libcares.so",
+    "etype": "DYN",
+    "machine": 183,
+    "needed": [
+      "libc.so"
+    ],
+    "load_align_min": 16384
+  },
+  {
+    "path": "libcrypto.so",
+    "etype": "DYN",
+    "machine": 183,
+    "needed": [
+      "libc.so",
+      "libdl.so"
+    ],
+    "load_align_min": 16384
+  },
+  {
+    "path": "libiconv.so",
+    "etype": "DYN",
+    "machine": 183,
+    "needed": [
+      "libc.so"
+    ],
+    "load_align_min": 16384
+  },
+  {
+    "path": "libicudata.so",
+    "etype": "DYN",
+    "machine": 183,
+    "needed": [],
+    "load_align_min": 16384
+  },
+  {
+    "path": "libicui18n.so",
+    "etype": "DYN",
+    "machine": 183,
+    "needed": [
+      "libc++_shared.so",
+      "libc.so",
+      "libdl.so",
+      "libicuuc.so",
+      "libm.so"
+    ],
+    "load_align_min": 16384
+  },
+  {
+    "path": "libicuuc.so",
+    "etype": "DYN",
+    "machine": 183,
+    "needed": [
+      "libc++_shared.so",
+      "libc.so",
+      "libdl.so",
+      "libicudata.so",
+      "libm.so"
+    ],
+    "load_align_min": 16384
+  },
+  {
+    "path": "libncursesw.so",
+    "etype": "DYN",
+    "machine": 183,
+    "needed": [
+      "libc.so"
+    ],
+    "load_align_min": 16384
+  },
+  {
+    "path": "libnode_dsh.so",
+    "etype": "DYN",
+    "machine": 183,
+    "needed": [
+      "libc++_shared.so",
+      "libc.so",
+      "libcares.so",
+      "libcrypto.so",
+      "libdl.so",
+      "libicui18n.so",
+      "libicuuc.so",
+      "libm.so",
+      "libsqlite3.so",
+      "libssl.so",
+      "libz.so"
+    ],
+    "load_align_min": 16384
+  },
+  {
+    "path": "libreadline.so",
+    "etype": "DYN",
+    "machine": 183,
+    "needed": [
+      "libandroid-support.so",
+      "libc.so",
+      "libncursesw.so"
+    ],
+    "load_align_min": 16384
+  },
+  {
+    "path": "libsqlite3.so",
+    "etype": "DYN",
+    "machine": 183,
+    "needed": [
+      "libc.so",
+      "libdl.so",
+      "libm.so",
+      "libz.so"
+    ],
+    "load_align_min": 16384
+  },
+  {
+    "path": "libssl.so",
+    "etype": "DYN",
+    "machine": 183,
+    "needed": [
+      "libc.so",
+      "libcrypto.so"
+    ],
+    "load_align_min": 16384
+  },
+  {
+    "path": "libz.so",
+    "etype": "DYN",
+    "machine": 183,
+    "needed": [
+      "libc.so"
+    ],
+    "load_align_min": 16384
+  }
+]

@@ -1,0 +1,53 @@
+# Android host overlay for dsh web.
+#
+# Stock Android offers no kernel sandbox runner: bwrap needs user namespaces
+# (SELinux denies them for app domains) and the Landlock syscalls are blocked
+# for untrusted apps (see termux-packages PR #19346 for the same syscall being
+# denied under Termux). The platform chain therefore cannot enforce, and
+# dsh-sandbox-local fails closed per call with SANDBOX_UNAVAILABLE.
+#
+# This overlay swaps the OS-confined bash executor for the local subprocess
+# executor, mirroring the documented Windows full-access recipe. The recipe
+# must be COMPLETE (both rows) or load fails loud: the two executor families
+# register the same `bash` service.
+#
+# tool-bash stays mounted as-is: on Android `process.platform === 'android'`,
+# so the base rows' win32 gating leaves the POSIX tool stack enabled already.
+# The `sandbox` provider row stays mounted but idle; the JS-side fs fencing
+# (fs-sandbox) keeps applying file-effect policy to ctx.fs writes.
+
+- id: bash-sandbox
+  disabled: true
+
+# The OS-runner sandbox provider imports koffi (FFI) for its Windows ACL
+# backend; koffi has no Android/bionic binding, and the provider is unused
+# once bash-local owns the executor seam. Disable it so boot proceeds.
+- id: sandbox
+  disabled: true
+
+# NOTE: `subprocess` and `attachment-local` stay MOUNTED. Their native
+# dependencies (node-pty, sharp) are replaced at assembly time by lazy-throw
+# stubs (assembly/androidize_payload.py): the modules load, every non-native
+# code path is the real implementation, and only pty allocation / image
+# decoding fail at call time. Disabling either row here starves hard
+# dependents instead (bash-local waits for `subprocess`, host-apiproxy for
+# `attachments`) and kills the tree after the ready line.
+
+# Permission presets bundle a sandbox mode and refuse to mount over an
+# unconfined executor ("does not confine" fail-loud). With no kernel runner on
+# Android the host runs danger-full-access: presets are disabled outright and
+# DSH_PERMISSION_MODE=danger-full-access switches the approval policy to never.
+- id: permission
+  disabled: true
+
+# Pin the browser-side directory picker: the auto resolver can reach the
+# native variant, whose Win32 dialog worker pulls koffi (FFI) — pointless and
+# broken under Android.
+- id: directory-picker
+  name: '@deepseek-ai/dsh-host-directory-picker-browse'
+
+- insert:
+    - id: bash-local
+      name: '@deepseek-ai/dsh-bash-local'
+      config:
+        timeoutMs: 60000
