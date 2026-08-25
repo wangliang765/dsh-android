@@ -13,6 +13,13 @@ assembly/tarballs/
 assembly/payload/
 # 上游仓库的 git worktree(rebuild-payload.ps1 每次重建,勿提交)
 assembly/worktree/
+# sharp-shim 测试 fixture(gen-fixtures.js 确定性再生;real-photo.jpg 来自本机壁纸)
+assembly/sharp-shim/test/fixtures/
+# 热部署包与调试产物(可重建)
+assembly/sharp-shim/deploy-v2.tgz
+assembly/device-pull/
+assembly/rebuild-log.txt
+assembly/test-session.txt
 
 # ===== 依赖与本地状态 =====
 node_modules/

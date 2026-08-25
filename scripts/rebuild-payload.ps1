@@ -19,7 +19,10 @@ Write-Host "== [1/7] fresh worktree at HEAD =="
 $wt = Join-Path $Asm 'worktree'
 git worktree remove $wt --force 2>$null
 if (Test-Path $wt) { Remove-Item $wt -Recurse -Force }
-git worktree add --detach $wt HEAD 2>&1 | Select-Object -Last 1
+# NOTE: no 2>&1 here — PS5.1 promotes git's stderr progress lines into
+# terminating errors under $ErrorActionPreference='Stop'.
+git worktree add --detach --quiet $wt HEAD
+if ($LASTEXITCODE -ne 0) { throw 'worktree add failed' }
 
 Write-Host "== [2/7] copy build outputs (preserves mtimes) =="
 $copied = 0
@@ -58,7 +61,12 @@ Write-Host "== [4/7] pack tarballs =="
 Remove-Item (Join-Path $Asm 'tarballs') -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path (Join-Path $Asm 'tarballs') | Out-Null
 Set-Location $wt
+# PS5.1 + Stop preference turns pnpm's stderr progress into terminating errors;
+# relax EAP around the noisy external commands only.
+$savedEap = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 pnpm --filter ./vendor/** --filter ./packages/** --filter ./apps/** --filter ./native/landlock-run/packages/entry --recursive pack --pack-destination (Join-Path $Asm 'tarballs') 2>&1 | Select-Object -Last 2
+$ErrorActionPreference = $savedEap
 $count = (Get-ChildItem (Join-Path $Asm 'tarballs') -Filter *.tgz).Count
 Write-Host "tarballs: $count"
 if ($count -lt 200) { throw "unexpectedly few tarballs: $count" }
@@ -68,7 +76,10 @@ $payloadParent = Join-Path $Asm 'payload'
 Remove-Item $payloadParent -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path (Join-Path $payloadParent 'dsh') | Out-Null
 Set-Location $Upstream
+$savedEap = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 pnpm --filter @deepseek-ai/dsh deploy --legacy --prod (Join-Path $payloadParent 'dsh') 2>&1 | Select-Object -Last 1
+$ErrorActionPreference = $savedEap
 if (-not (Test-Path (Join-Path $payloadParent 'dsh\lib\bin.js'))) { throw 'deploy missing bin.js' }
 
 Write-Host "== [6/7] complete peers + androidize =="

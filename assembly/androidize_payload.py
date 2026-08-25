@@ -69,9 +69,22 @@ def install_node_pty_stub(payload):
 
 
 def install_native_stub(payload, name, version_note):
-    """Install a lazy-throwing stub package over a native-dependent module."""
+    """Install a stub package over a native-dependent module.
+
+    For sharp, install a pure-JS metadata parser instead of a throw-everything
+    Proxy — read_image calls sharp().metadata() on every invocation, so a
+    throw-only stub turns the tool into a 100%-failure bug. The shim parses
+    JPEG/PNG/WebP/GIF headers to provide format/width/height/alpha/orientation,
+    which is enough for read_image's pass-through fast path. Pipeline
+    operations that need real pixel data (resize/re-encode) still fail loud.
+    """
     target = os.path.join(payload, "node_modules", name)
     os.makedirs(target, exist_ok=True)
+
+    if name == "sharp":
+        _install_sharp_js_shim(target)
+        return
+
     with open(os.path.join(target, "package.json"), "w", encoding="utf-8", newline="\n") as handle:
         json.dump({
             "name": name,
@@ -83,8 +96,7 @@ def install_native_stub(payload, name, version_note):
         handle.write(
             "'use strict'\n"
             f"// Android assembly stub (see docs/m1-notes.md): real {name} native\n"
-            "// bindings target glibc/musl and cannot load under bionic. Consumers on\n"
-            "// this host never reach these calls on mounted code paths.\n"
+            "// bindings target glibc/musl and cannot load under bionic.\n"
             "module.exports = new Proxy({}, {\n"
             "  get() {\n"
             "    return function unavailable() {\n"
@@ -95,6 +107,192 @@ def install_native_stub(payload, name, version_note):
         )
     print(f"installed {name} android stub")
 
+
+def _install_sharp_js_shim(target):
+    """Install the full pure-JS sharp replacement from assembly/sharp-shim/.
+
+    v2 shim implements real pixel operations on top of three vendored
+    zero-dependency libraries (jpeg-js decode/encode, pngjs, omggif):
+    metadata(), raw().toBuffer(), resize(fit:'inside'), rotate() EXIF orient,
+    .jpeg()/.png() re-encode. WebP stays header-only and fails loud with a
+    SHIM_NO_WEBP* code, which patch_attachment_webp_fallback() converts into
+    an oversized candidate so the caller's fallback loops skip it cleanly.
+    """
+    shim_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sharp-shim")
+    index_src = os.path.join(shim_src, "index.js")
+    vendor_src = os.path.join(shim_src, "vendor")
+    if not (os.path.isfile(index_src) and os.path.isdir(vendor_src)):
+        raise RuntimeError(
+            "sharp-shim sources missing: expected %s (run once: "
+            "npm install jpeg-js pngjs omggif in assembly/sharp-shim/vendor)" % index_src
+        )
+    import shutil as _shutil
+    # Fresh target: no stale files from previous shim generations.
+    if os.path.isdir(target):
+        _shutil.rmtree(target)
+    os.makedirs(target)
+    with open(os.path.join(target, "package.json"), "w", encoding="utf-8", newline="\n") as handle:
+        json.dump({
+            "name": "sharp",
+            "version": "0.34.5-android-js-shim2",
+            "description": "Android pure-JS sharp shim v2: jpeg-js/pngjs/omggif-backed decode, resize, re-encode; WebP header-only",
+            "main": "index.js",
+        }, handle)
+    _shutil.copyfile(index_src, os.path.join(target, "index.js"))
+    _shutil.copytree(vendor_src, os.path.join(target, "vendor"))
+    print("installed sharp android pure-JS shim v2 (jpeg/png pixel pipeline)")
+
+
+def patch_attachment_webp_fallback(payload):
+    """Teach dsh-attachment-local to skip unencodable WebP candidates.
+
+    The shim cannot encode WebP, but attachment-local mixes .webp attempts
+    into its candidate lists ([png, ...webp] / [...webp]); one thrown
+    candidate aborts encodeFirstWithinLimit entirely instead of falling
+    through to the next format or the shrink loop. Patch both encode()
+    helpers so a SHIM_NO_WEBP* failure yields an always-oversized candidate:
+    byte comparisons treat it as "does not fit", preserving the caller's
+    normal fallback and shrink-to-fit behaviour. Real sharp output is
+    unaffected (it never throws those codes).
+    """
+    rel = os.path.join("node_modules", "@deepseek-ai", "dsh-attachment-local", "lib", "index.js")
+    path = os.path.join(payload, rel)
+    with open(path, "r", encoding="utf-8", newline="") as handle:
+        src = handle.read()
+    if "SHIM_NO_WEBP" in src:
+        print("attachment-local webp fallback already patched")
+        return
+
+    head_a = '\tconst { data, info } = await (mediaType === "image/png" ? pipeline.png({'
+    head_b = '\tconst { data, info } = await (mediaType === "image/png" ? image.png({'
+    head_new = ('\tlet data, info;\n'
+                '\ttry {\n'
+                '\t\t({ data, info } = await (mediaType === "image/png" ? ')
+    tail_old = (')).toBuffer({ resolveWithObject: true });\n'
+                '\treturn {\n'
+                '\t\tdata: new Uint8Array(data),')
+    tail_new = (')).toBuffer({ resolveWithObject: true }));\n'
+                '\t} catch (error) {\n'
+                '\t\tif (error && typeof error.code === "string" && error.code.indexOf("SHIM_NO_WEBP") === 0) '
+                'return { data: { byteLength: Number.MAX_SAFE_INTEGER }, mediaType, width: 0, height: 0 };\n'
+                '\t\tthrow error;\n'
+                '\t}\n'
+                '\treturn {\n'
+                '\t\tdata: new Uint8Array(data),')
+
+    count = src.count(tail_old)
+    if count != 2 or not (head_a in src and head_b in src):
+        raise RuntimeError(
+            "attachment-local encode() shape drifted: heads=%d/%d tails=%d — re-derive this patch"
+            % (src.count(head_a), src.count(head_b), count)
+        )
+    src = src.replace(head_a, head_new + 'pipeline.png({')
+    src = src.replace(head_b, head_new + 'image.png({')
+    src = src.replace(tail_old, tail_new)
+    with open(path, "w", encoding="utf-8", newline="") as handle:
+        handle.write(src)
+    print("patched attachment-local encode() x2 -> SHIM_NO_WEBP becomes oversized candidate")
+
+
+def patch_attachment_android_io(payload):
+    """Fix two Android-fatal filesystem assumptions in dsh-attachment-local.
+
+    1. ensureDurableDirectory walks from the storage directory up to the
+       filesystem root fsyncing every ancestor. On Android the walk crosses
+       /data/data (realpath /data/user/0), which app domains cannot open ->
+       EACCES on the very first attachment commit. Ancestor syncs outside the
+       app sandbox are impossible here, so make them best-effort: ignore
+       EACCES/EPERM, propagate anything else.
+    2. commitPreparedImageFile publishes objects via hardlink(2). This OEM ROM
+       denies link(2) inside app data dirs (same SELinux restriction already
+       handled for session-jsonl and fs-local). Fall back to rename(2), which
+       is allowed, keeping the EEXIST digest-verification semantics: content
+       addressing means a renamed object carries identical bytes.
+    """
+    rel = os.path.join("node_modules", "@deepseek-ai", "dsh-attachment-local", "lib", "index.js")
+    path = os.path.join(payload, rel)
+    with open(path, "r", encoding="utf-8", newline="") as handle:
+        src = handle.read()
+
+    applied = []
+
+    walk_old = (
+        '\twhile (level !== stop) {\n'
+        '\t\tconst parent = dirname(level);\n'
+        '\t\tawait syncDirectory(parent);\n'
+    )
+    walk_new = (
+        '\twhile (level !== stop) {\n'
+        '\t\tconst parent = dirname(level);\n'
+        '\t\t// ANDROID-IO-PATCH: ancestors above the app sandbox cannot be opened;\n'
+        '\t\t// treat EACCES/EPERM ancestor syncs as best-effort instead of fatal.\n'
+        '\t\tawait syncDirectory(parent).catch((error) => {\n'
+        '\t\t\tif (!(error instanceof Error && "code" in error && (error.code === "EACCES" || error.code === "EPERM"))) throw error;\n'
+        '\t\t});\n'
+    )
+    if walk_old in src:
+        src = src.replace(walk_old, walk_new)
+        applied.append("ancestor-fsync")
+
+    link_old = (
+        '\t\ttry {\n'
+        '\t\t\tawait link(temporary, target);\n'
+        '\t\t} catch (error) {\n'
+        '\t\t\t/* v8 ignore next -- Private same-filesystem directories make EEXIST the only recoverable link race. */\n'
+        '\t\t\tif (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;\n'
+        '\t\t\tif (digest$1(new Uint8Array(await readFile(target))) !== sha256) throw new AttachmentError("Stored attachment failed integrity verification.", "ATTACHMENT_CORRUPT");\n'
+        '\t\t}\n'
+    )
+    link_new = (
+        '\t\ttry {\n'
+        '\t\t\tawait link(temporary, target);\n'
+        '\t\t} catch (error) {\n'
+        '\t\t\t// ANDROID-IO-PATCH: this kernel denies link(2) inside app data dirs.\n'
+        '\t\t\tconst errorCode = error instanceof Error && "code" in error ? error.code : void 0;\n'
+        '\t\t\tif (errorCode === "EEXIST") {\n'
+        '\t\t\t\tif (digest$1(new Uint8Array(await readFile(target))) !== sha256) throw new AttachmentError("Stored attachment failed integrity verification.", "ATTACHMENT_CORRUPT");\n'
+        '\t\t\t} else if (errorCode === "EPERM" || errorCode === "EACCES" || errorCode === "EXDEV" || errorCode === "ENOSYS" || errorCode === "EINVAL") {\n'
+        '\t\t\t\ttry {\n'
+        '\t\t\t\t\tawait rename(temporary, target);\n'
+        '\t\t\t\t} catch (renameError) {\n'
+        '\t\t\t\t\tif (!(renameError instanceof Error && "code" in renameError && renameError.code === "EEXIST")) throw renameError;\n'
+        '\t\t\t\t}\n'
+        '\t\t\t\tif (digest$1(new Uint8Array(await readFile(target))) !== sha256) throw new AttachmentError("Stored attachment failed integrity verification.", "ATTACHMENT_CORRUPT");\n'
+        '\t\t\t} else {\n'
+        '\t\t\t\tthrow error;\n'
+        '\t\t\t}\n'
+        '\t\t}\n'
+    )
+    if link_old in src:
+        src = src.replace(link_old, link_new)
+        applied.append("link-rename")
+
+    # The rename fallback consumes the staging file, so the unconditional
+    # cleanup unlink in the success path hits ENOENT and would misreport an
+    # already-successful publish as ATTACHMENT_WRITE_FAILED. Tolerate ENOENT.
+    unlink_old = (
+        '\t\tawait syncDirectory(join(root, "objects"));\n'
+        '\t\tawait unlink(temporary);\n'
+    )
+    unlink_new = (
+        '\t\tawait syncDirectory(join(root, "objects"));\n'
+        '\t\t// ANDROID-IO-PATCH: the rename fallback already consumed the staging\n'
+        '\t\t// file; a missing temp object means the publish itself succeeded.\n'
+        '\t\tawait unlink(temporary).catch((cleanupError) => {\n'
+        '\t\t\tif (!(cleanupError instanceof Error && "code" in cleanupError && cleanupError.code === "ENOENT")) throw cleanupError;\n'
+        '\t\t});\n'
+    )
+    if unlink_old in src:
+        src = src.replace(unlink_old, unlink_new)
+        applied.append("cleanup-unlink")
+
+    if not applied:
+        print("attachment-local android io already fully patched")
+        return
+
+    with open(path, "w", encoding="utf-8", newline="") as handle:
+        handle.write(src)
+    print("patched attachment-local io: " + ", ".join(applied))
 
 def install_koffi_stub(payload):
     """Replace koffi with an Android-safe lazy stub.
@@ -393,6 +591,12 @@ def main():
     install_koffi_stub(payload)
     patch_session_link_fallback(payload)
     patch_fs_local_write_link_fallback(payload)
+    # The JS shim cannot encode WebP; keep attachment-local's candidate loops
+    # alive when a WebP attempt fails loud.
+    patch_attachment_webp_fallback(payload)
+    # Attachment publication walks to / and hardlinks: both fatal under the
+    # Android app sandbox (see function doc).
+    patch_attachment_android_io(payload)
     install_ripgrep(payload)
     install_user_plugins(payload)
 

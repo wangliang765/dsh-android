@@ -101,3 +101,65 @@ PC 端"没事"只是因为没开思考档位，坑是跨平台的。
 
 遗留两条：① UI 编辑器里关此开关未落盘 settings.yaml，需查 ui-settings-models 保存链路；
 ② 自研特性宜改为"未知端点默认 false"，显式声明才 true。
+
+## read_image 修复（2026-08-25，sharp v2 纯 JS 垫片 + attachment-local 三补丁）
+
+### 演进
+
+v1 垫片只做头解析、像素操作全抛错 → read_image 卡在
+`detectImage()` 的 `image.raw().toBuffer()`（复测报告《方案A复测报告.txt》）。
+本轮实施完整像素管线（assembly/sharp-shim/，构建期整体拷入 payload）：
+
+- 解码：jpeg-js（JPEG）、pngjs（PNG）、omggif（GIF 首帧）；WebP 保持仅头解析，
+  像素访问抛 `SHIM_NO_WEBP_DECODE`。
+- `metadata()`：与真实 sharp 同语义 —— 返回**未转置原始尺寸** + orientation 字段，
+  转置由调用方 imageMetadata 负责（v1 在垫片里预转置导致双重转置，已修）。
+  PNG/GIF 的 hasAlpha 做真实透明像素扫描（"有 alpha 平面但全不透明"必须报 false，
+  否则调用方误入 webp-only 编码分支）。
+- `resize(fit:'inside')`：盒式面积平均（kernel:nearest 时最近邻）；`rotate()` EXIF 2..8。
+- 编码：jpeg-js（quality）/pngjs（colorType 2/6）。WeakMap 按 Buffer×格式缓存解码，
+  一次 read_image 的 probe→detect→采样→多次编码尝试只解码一次。
+
+### attachment-local 三补丁（androidize_payload.py）
+
+1. `patch_attachment_webp_fallback`：两个 encode() 助手捕获 SHIM_NO_WEBP* 转为
+   byteLength=MAX_SAFE_INTEGER 的超限候选——否则一个 webp 抛错会炸掉
+   encodeFirstWithinLimit 的整条回退链（透明高色数图原本必死，现在干净走
+   IMAGE_TOO_LARGE 收缩终止语义；低色数图正常落到 png/jpeg 分支）。
+2. `patch_attachment_android_io`（io 部分）：
+   - ensureDurableDirectory 从存储目录一路 fsync 祖先直到文件系统根 `/`，
+     Android 上打开 /data/data（realpath /data/user/0）即 EACCES →
+     祖先同步改 best-effort（忽略 EACCES/EPERM，其余照抛）。
+   - commitPreparedImageFile 用 link(2) 发布对象，本机 SELinux 拒绝应用数据目录
+     hardlink（同 session-jsonl 雷）→ link 失败（EPERM/EACCES/EXDEV/ENOSYS/EINVAL）
+     回退 rename(2)，保留 EEXIST 摘要校验语义。
+   - rename 回退会消耗 staging 文件，成功路径末尾无条件 unlink(temporary) 会
+     ENOENT 把成功误报为 ATTACHMENT_WRITE_FAILED → 该 unlink 容忍 ENOENT。
+
+### 本地验证（assembly/sharp-shim/test/）
+
+gen-fixtures.js 生成 10 个确定性 fixture（渐变照片/RGB 截图/RAMA 全不透明陷阱/
+真透明 UI/透明噪声/纯噪声/静态与动画 GIF/EXIF6 拼接/Windows 壁纸）；
+run-test.mjs 直接 import **部署包**的 dsh-attachment-local/lib/index.js（含补丁），
+走 prepareImageFile/readRequestImageFile 生产全链路 + 垫片单元断言。19/19 通过。
+
+### 设备端到端（RMX3888, adb forward tcp:13080→tcp:3080）
+
+- 热部署 deploy-v2.tgz（sharp 目录 + attachment-local/lib/index.js）→ force-stop 重启。
+- JPEG（3840x2400 Windows 壁纸）：read_image 一次成功，规范化降采样 2048x1280，
+  sha256 对象落 files/.dsh/attachments/v1/objects/d8/…，模型准确描述 Bloom 壁纸内容。
+- PNG（720x1280 UI fixture）：pass-through 直通，模型像素级还原内容
+  （绿色顶栏/白色列表行/深色页脚）。
+- 请求图缓存说明：规范化结果已满足请求策略时 version.data === attachment.data，
+  按设计跳过 request-images 缓存条目。
+
+### 构建链固化
+
+全部补丁收敛在 androidize_payload.py（sharp-shim 整目录拷贝 + 两函数补丁），
+rebuild-payload.ps1 全链重建即自动包含；另修了该脚本 PS5.1 下 git/pnpm stderr
+进度被 $ErrorActionPreference='Stop' 提升为终止错误的问题（git worktree add 去 2>&1，
+pnpm 段落局部放宽 EAP）。
+
+已知边界：WebP 像素解码/编码不可用（头解析可用）；透明+高色数图无法编码
+（webp-only 分支，收缩后 IMAGE_TOO_LARGE）；pngjs 无调色板编码，低色数图的
+palette PNG 由 truecolor RGB 替代（体积大些，功能等价）。
