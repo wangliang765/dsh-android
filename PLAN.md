@@ -128,6 +128,16 @@ E:\code\dsh-android\
 - 上游回流 PR：「android 平台显式处理」（PLATFORM_CHAINS 对未知 platform 的 fail-loud 语义 + 文档）、bash-local 换栈配方文档补安卓条目；
 - 发布产物：可侧载 APK + 构建复现文档。
 
+### M4 — App 层工具级确认对话框（待排期，暂不实施）
+
+在 Kotlin 层（DshService / Bridge）拦截高危工具调用（bash 写操作、write/edit、web_fetch 等），弹原生确认框让用户逐条批准/拒绝。设计要点：
+
+- 拦截层：Kotlin 侧监听 Node 的工具调用事件（loopback HTTP 或文件信号），高危类别触发 AlertDialog；
+- 粒度：按工具名 + 参数摘要展示，用户可选"本次允许/永久允许此工具/拒绝"；
+- 不改 DSH 内核层：approval 仍为 never（内核不做沙盒），纯 App UI 层安全网；
+- 触发条件：仅对 `DSH_PERMISSION_MODE=danger-full-access` 生效；
+- 前置依赖：M2 Bridge v1 的 loopback HTTP JSON 服务就绪后才有通信通道。
+
 ## 7. 风险清单
 
 | 风险 | 影响 | 缓解 |
