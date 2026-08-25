@@ -45,13 +45,28 @@ def main():
         path, entry = pair.split("=", 1)
         extras.append((path, entry))
     written = 0
+    # Merge machine-generated user-plugin insert rows into the shipped
+    # android.patch.yml without mutating the repo-tracked source file.
+    generated = os.path.join(os.path.dirname(os.path.abspath(__file__)), "generated", "user-plugins.patch.yml")
+    merged_patch = None
+    if os.path.isfile(generated):
+        with open(generated, encoding="utf-8") as handle:
+            fragment = handle.read()
+        for path, entry in extras:
+            if entry == "android.patch.yml":
+                with open(path, encoding="utf-8") as handle:
+                    merged_patch = handle.read().rstrip("\n") + "\n\n" + fragment
+                break
     with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as target:
         for full in iter_files(payload_dir):
             rel = os.path.relpath(full, payload_dir).replace(os.sep, "/")
             target.write(full, rel)
             written += 1
         for path, entry in extras:
-            target.write(path, entry)
+            if entry == "android.patch.yml" and merged_patch is not None:
+                target.writestr(zipfile.ZipInfo(entry), merged_patch)
+            else:
+                target.write(path, entry)
             written += 1
     size = os.path.getsize(out_zip)
     print(f"{out_zip}: {written} entries, {size / (1 << 20):.0f} MB")

@@ -212,8 +212,51 @@ public class DshService extends Service {
         if (!new File(runtimeDir, "ca-cert.pem").renameTo(new File(etcTls, "cert.pem"))) {
             throw new IllegalStateException("runtime.zip missing ca-cert.pem entry");
         }
+        mirrorUserAgentPresets(new File(runtimeDir, "config/user-agent-presets"));
         writeFile(marker, fingerprint);
         appendTail("extraction done");
+    }
+
+    /**
+     * Mirror shipped user agent presets (payload config/user-agent-presets,
+     * staged by androidize_payload.install_user_agent_presets) into
+     * $DSH_HOME/.agent-presets so they appear in the session preset picker.
+     * DSH only scans first-level directories there; the mirror is additive:
+     * presets the user deleted are restored on the next APK update, which is
+     * the accepted trade-off for shipping them inside the APK.
+     */
+    private void mirrorUserAgentPresets(File staged) {
+        File[] dirs = staged.listFiles(File::isDirectory);
+        if (dirs == null || dirs.length == 0) return;
+        File target = new File(new File(getFilesDir(), ".dsh/.agent-presets"), "");
+        target.mkdirs();
+        for (File dir : dirs) {
+            File dst = new File(target, dir.getName());
+            dst.mkdirs();
+            copyTree(dir, dst);
+            Log.i(TAG, "mirrored user agent preset: " + dst);
+        }
+    }
+
+    private void copyTree(File src, File dst) {
+        File[] children = src.listFiles();
+        if (children == null) return;
+        for (File child : children) {
+            File out = new File(dst, child.getName());
+            if (child.isDirectory()) {
+                out.mkdirs();
+                copyTree(child, out);
+            } else {
+                try (java.io.FileInputStream in = new java.io.FileInputStream(child);
+                     java.io.FileOutputStream fout = new java.io.FileOutputStream(out)) {
+                    byte[] buffer = new byte[65536];
+                    int read;
+                    while ((read = in.read(buffer)) > 0) fout.write(buffer, 0, read);
+                } catch (Exception e) {
+                    Log.w(TAG, "preset copy failed: " + child, e);
+                }
+            }
+        }
     }
 
     /**
