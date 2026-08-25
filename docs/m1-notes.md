@@ -1,5 +1,8 @@
 # M1 装配笔记（进行中）
 
+> 补丁与兼容性的**总账**在 [docs/patches.md](patches.md)（每个补丁的锚点、幂等标记、
+> 根因一句话、上游升级 SOP）；本文件保留各轮排查叙事。
+
 ## 启动契约（已实证）
 
 - 官方打包形态：全量 workspace 包 pack 成 npm tarball → consumer 目录 `npm install` → `node node_modules/@deepseek-ai/dsh/lib/bin.js web --host 127.0.0.1 --port N`。
