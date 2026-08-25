@@ -121,6 +121,7 @@ public class DshService extends Service {
             File runtimeDir = new File(filesDir, "runtime");
             extractAssets(runtimeDir);
             bridgePhoneStorage(filesDir);
+            fixExecPermissions(runtimeDir);
 
             ArrayList<String> argv = new ArrayList<>();
             argv.add(new File(getApplicationInfo().nativeLibraryDir, "libnode_dsh.so").getAbsolutePath());
@@ -216,6 +217,31 @@ public class DshService extends Service {
     }
 
     /**
+     * ZipInputStream does not preserve POSIX permission bits, so binaries
+     * extracted from runtime.zip land as non-executable. Walk the tree and
+     * chmod +x the known native executables (ripgrep, etc.). Files under
+     * node_modules/@vscode/ripgrep-linux-arm64/bin are the glob/grep backend.
+     */
+    private void fixExecPermissions(File runtimeDir) {
+        File rgBin = new File(runtimeDir,
+            "node_modules/@vscode/ripgrep-android-arm64/bin/rg");
+        if (rgBin.isFile() && !rgBin.canExecute()) {
+            try {
+                setExecutable(rgBin);
+                Log.i(TAG, "chmod +x " + rgBin);
+            } catch (Exception e) {
+                Log.w(TAG, "chmod failed for rg", e);
+            }
+        }
+    }
+
+    /** Executes chmod via ProcessBuilder (java.io.File.setExecutable is a no-op on some ROMs). */
+    private void setExecutable(File file) throws Exception {
+        new ProcessBuilder("chmod", "755", file.getAbsolutePath())
+            .inheritIO().start().waitFor();
+    }
+
+    /**
      * Bridges shared storage into the directory-picker's browse root. The GUI
      * workspace dialog lists homedir() (= filesDir here) and its crumb trail
      * collapses everything above home, so /storage is unreachable by climbing.
@@ -250,15 +276,25 @@ public class DshService extends Service {
      * Ensures files/bin/bash exists as a symlink to the bundled termux bash
      * (libbash.so inside nativeLibraryDir) and returns the bin dir for PATH.
      * Re-links when the install path changed (each update gets a new
-     * /data/app/~~random/ directory).
+     * /data/app/~~random/ directory). Also links rg (ripgrep) from librg.so.
      */
     private File ensureBashOnPath(File filesDir, String nativeDir) throws Exception {
         File binDir = new File(filesDir, "bin");
         if (!binDir.isDirectory() && !binDir.mkdirs()) {
             throw new IllegalStateException("cannot create app bin dir: " + binDir);
         }
-        File link = new File(binDir, "bash");
-        File target = new File(nativeDir, "libbash.so");
+        linkNativeBinary(binDir, "bash", new File(nativeDir, "libbash.so"));
+        linkNativeBinary(binDir, "rg", new File(nativeDir, "librg.so"));
+        return binDir;
+    }
+
+    /** Creates or refreshes a symlink in binDir linking name to target. */
+    private void linkNativeBinary(File binDir, String name, File target) throws Exception {
+        if (!target.isFile()) {
+            appendTail("WARN: native binary missing: " + target);
+            return;
+        }
+        File link = new File(binDir, name);
         boolean valid = false;
         try {
             valid = link.exists() && target.getAbsolutePath().equals(link.getCanonicalPath());
@@ -268,9 +304,8 @@ public class DshService extends Service {
         if (!valid) {
             link.delete();
             Files.createSymbolicLink(link.toPath(), target.toPath());
-            appendTail("linked bash -> " + target);
+            appendTail("linked " + name + " -> " + target);
         }
-        return binDir;
     }
 
     private void unzip(InputStream input, File targetDir) throws Exception {

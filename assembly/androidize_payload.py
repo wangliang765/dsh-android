@@ -211,6 +211,142 @@ def patch_session_link_fallback(payload):
     print("patched session link->rename fallback")
 
 
+def patch_fs_local_write_link_fallback(payload):
+    """Add a rename() fallback to dsh-fs-local's writeFileAtomic createIfAbsent path.
+
+    The write tool creates new files via hard-link(2) (temp → target), which
+    hardened OEM ROMs (realme/MIUI SELinux) deny with EACCES inside app-private
+    data dirs. Overwriting existing files uses rename(2) and works fine — which
+    is why edit succeeds while write fails. When link fails with EACCES/EPERM,
+    fall back to rename(); other errors keep flowing to the original guard.
+    """
+    # Locate the fs-local lib inside .pnpm (hash varies per build).
+    pnpm_root = os.path.join(payload, "node_modules", ".pnpm")
+    target_rel = os.path.join("node_modules", "@deepseek-ai", "dsh-fs-local", "lib", "index.js")
+    source_path = None
+    if os.path.isdir(pnpm_root):
+        for entry in os.listdir(pnpm_root):
+            if entry.startswith("@deepseek-ai+dsh-fs-local@"):
+                candidate = os.path.join(pnpm_root, entry, target_rel)
+                if os.path.isfile(candidate):
+                    source_path = candidate
+                    break
+    if source_path is None:
+        # Fallback: direct hoisted layout.
+        candidate = os.path.join(payload, target_rel)
+        if os.path.isfile(candidate):
+            source_path = candidate
+    if source_path is None:
+        raise SystemExit("dsh-fs-local lib/index.js not found; cannot apply write link fallback")
+
+    with open(source_path, encoding="utf-8") as handle:
+        source = handle.read()
+
+    marker = "ANDROID LINK FALLBACK"
+    if marker in source:
+        print("fs-local write link fallback already patched")
+        return
+
+    original_block = (
+        "\t\tif (createIfAbsent !== void 0) try {\n"
+        "\t\t\tawait linkFile(tempPath, absolutePath);\n"
+        "\t\t} catch (error) {\n"
+        "\t\t\tawait throwGuardedCreateFailure(error, absolutePath, createIfAbsent.displayPath, inspectPublicationTarget);\n"
+        "\t\t}\n"
+    )
+    patched_block = (
+        "\t\tif (createIfAbsent !== void 0) try {\n"
+        "\t\t\tawait linkFile(tempPath, absolutePath);\n"
+        "\t\t} catch (linkError) {\n"
+        "\t\t\t// ANDROID LINK FALLBACK: hardened OEM ROMs deny hardlink(2)\n"
+        "\t\t\t// inside app-private data dirs; publish via rename instead.\n"
+        "\t\t\tif (linkError && (linkError.code === 'EACCES' || linkError.code === 'EPERM'))\n"
+        "\t\t\t\tawait rename(tempPath, absolutePath);\n"
+        "\t\t\telse\n"
+        "\t\t\t\tawait throwGuardedCreateFailure(linkError, absolutePath, createIfAbsent.displayPath, inspectPublicationTarget);\n"
+        "\t\t}\n"
+    )
+    if original_block not in source:
+        raise SystemExit("fs-local writeFileAtomic block drifted; update patch_fs_local_write_link_fallback")
+    source = source.replace(original_block, patched_block)
+    with open(source_path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(source)
+    print("patched fs-local write link->rename fallback")
+
+
+def install_ripgrep(payload):
+    """Install a static arm64 ripgrep binary where @vscode/ripgrep expects it.
+
+    glob/grep tools delegate to @vscode/ripgrep which resolves
+    `@vscode/ripgrep-linux-arm64/bin/rg` as an optional dependency — never
+    installed because the deploy runs on Windows. A musl static binary works
+    under bionic without any .so dependency.
+    """
+    import urllib.request
+    import tarfile
+    import tempfile
+    import shutil as _shutil
+
+    rg_version = "15.2.0"
+    url = ("https://github.com/BurntSushi/ripgrep/releases/download/"
+           f"{rg_version}/ripgrep-{rg_version}-aarch64-unknown-linux-musl.tar.gz")
+    # process.platform on Android is 'android', NOT 'linux'. @vscode/ripgrep
+    # resolves `@vscode/ripgrep-${process.platform}-${arch}/bin/rg` via
+    # require.resolve — which follows pnpm's real-path layout and fails to
+    # find a top-level install. Instead of fighting module resolution,
+    # rewrite @vscode/ripgrep/lib/index.js to export a direct file URL.
+    platform_pkg = os.path.join(payload, "node_modules", "@vscode", "ripgrep-android-arm64", "bin")
+    rg_target = os.path.join(platform_pkg, "rg")
+    if not (os.path.isfile(rg_target) and os.path.getsize(rg_target) > 1000000):
+        os.makedirs(platform_pkg, exist_ok=True)
+        tmpdir = tempfile.mkdtemp(prefix="dsh-rg-")
+        try:
+            tgz_path = os.path.join(tmpdir, "rg.tgz")
+            print(f"downloading ripgrep {rg_version} arm64-musl...")
+            urllib.request.urlretrieve(url, tgz_path)
+            with tarfile.open(tgz_path, "r:gz") as tar:
+                member = f"ripgrep-{rg_version}-aarch64-unknown-linux-musl/rg"
+                tar.extract(member, tmpdir)
+            extracted = os.path.join(tmpdir, f"ripgrep-{rg_version}-aarch64-unknown-linux-musl", "rg")
+            _shutil.copy2(extracted, rg_target)
+            os.chmod(rg_target, 0o755)
+            print(f"installed ripgrep -> {rg_target} ({os.path.getsize(rg_target)} bytes)")
+        except Exception as e:
+            print(f"WARN: ripgrep install failed ({e}); glob/grep will not work until fixed")
+        finally:
+            _shutil.rmtree(tmpdir, ignore_errors=True)
+    else:
+        print("ripgrep binary already installed")
+    # Rewrite @vscode/ripgrep/lib/index.js to export an ABSOLUTE path.
+    # CRITICAL: targetSdk>=29 W^X blocks exec() from app-writable data dirs.
+    # The only exec-permitted location is nativeLibraryDir; DshService creates
+    # a symlink files/bin/rg -> nativeLibraryDir/librg.so and prepends
+    # files/bin to PATH. So we point rgPath at the SYMLINK, not the payload.
+    stub_content = (
+        "const rgPath = '/data/data/dev.dsh.spike/files/bin/rg';\n"
+        "export { rgPath };\n"
+    )
+    patched_count = 0
+    nm_root = os.path.join(payload, "node_modules")
+    for dirpath, dirs, files in os.walk(nm_root):
+        dirs[:] = [d for d in dirs if d != '.bin']
+        if os.path.basename(dirpath) != 'lib':
+            continue
+        parent = os.path.basename(os.path.dirname(dirpath))
+        grandparent = os.path.basename(os.path.dirname(os.path.dirname(dirpath)))
+        # Match @vscode/ripgrep/lib/ or .pnpm/@vscode+ripgrep@*/node_modules/@vscode/ripgrep/lib/
+        if not (parent == 'ripgrep' and 'vscode' in (grandparent + dirpath).lower()):
+            continue
+        candidate = os.path.join(dirpath, 'index.js')
+        if not os.path.isfile(candidate):
+            continue
+        # ALWAYS overwrite: the stub is deterministic and tiny.
+        with open(candidate, 'w', encoding='utf-8', newline='\n') as hf:
+            hf.write(stub_content)
+        patched_count += 1
+    print(f"patched {patched_count} @vscode/ripgrep copies -> direct rgPath")
+
+
 def main():
     payload = sys.argv[1]
     presets_root = os.path.join(payload, "config", "agent-presets")
@@ -227,6 +363,8 @@ def main():
     # install_koffi_stub for why a plain lazy-throw stub is not enough here.
     install_koffi_stub(payload)
     patch_session_link_fallback(payload)
+    patch_fs_local_write_link_fallback(payload)
+    install_ripgrep(payload)
 
 
 if __name__ == "__main__":
