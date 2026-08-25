@@ -347,6 +347,35 @@ def install_ripgrep(payload):
     print(f"patched {patched_count} @vscode/ripgrep copies -> direct rgPath")
 
 
+def install_user_plugins(payload):
+    """Copy standalone user plugins into the payload's node_modules.
+
+    These are workspace members under packages/plugin/ in the harness repo.
+    They produce tarballs during pack but are NOT dependencies of
+    @deepseek-ai/dsh, so pnpm deploy skips them. We copy them explicitly so
+    the cordis loader can resolve them at runtime on the device.
+    """
+    upstream = os.environ.get("DSH_UPSTREAM", r"E:\code\deepseek-harness")
+    src_root = os.path.join(upstream, "packages", "plugin")
+    if not os.path.isdir(src_root):
+        print(f"WARN: user plugin source not found: {src_root}")
+        return
+    nm = os.path.join(payload, "node_modules")
+    import shutil as _shutil
+    for name in os.listdir(src_root):
+        pkg_json = os.path.join(src_root, name, "package.json")
+        if not os.path.isfile(pkg_json):
+            continue
+        dst = os.path.join(nm, name)
+        if os.path.exists(dst):
+            _shutil.rmtree(dst)
+        _shutil.copytree(
+            os.path.join(src_root, name), dst,
+            ignore=_shutil.ignore_patterns("node_modules", ".vite*", "tests", "*.spec.*"),
+        )
+        print(f"copied user plugin {name} -> {dst}")
+
+
 def main():
     payload = sys.argv[1]
     presets_root = os.path.join(payload, "config", "agent-presets")
@@ -365,6 +394,7 @@ def main():
     patch_session_link_fallback(payload)
     patch_fs_local_write_link_fallback(payload)
     install_ripgrep(payload)
+    install_user_plugins(payload)
 
 
 if __name__ == "__main__":
