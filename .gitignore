@@ -25,3 +25,6 @@ assembly/test-session.txt
 node_modules/
 __pycache__/
 *.log
+
+assembly/apk-build-log.txt
+assembly/rebuild-log.txt

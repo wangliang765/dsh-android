@@ -51,3 +51,17 @@
       name: '@deepseek-ai/dsh-bash-local'
       config:
         timeoutMs: 60000
+
+# User plugins (dsh-vision-bridge, dsh-plugin-toggle). Their packages are
+# copied into the payload's node_modules root by androidize_payload.py's
+# install_user_plugins(), which ALSO appends their names to the dsh app
+# manifest's dependencies so the boot-time healProfilesModuleFallback pass
+# links them into $DSH_HOME/profiles/node_modules — that flat fallback is
+# what makes these bare specifiers resolvable from the profile context.
+# vision-bridge ships defaults aimed at the official DeepSeek vision model;
+# repoint backendProvider/backendModel from its settings section at runtime.
+- insert:
+    - id: dsh-plugin-toggle
+      name: dsh-plugin-toggle
+    - id: dsh-vision-bridge
+      name: dsh-vision-bridge

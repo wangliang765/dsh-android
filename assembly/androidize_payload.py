@@ -546,12 +546,20 @@ def install_ripgrep(payload):
 
 
 def install_user_plugins(payload):
-    """Copy standalone user plugins into the payload's node_modules.
+    """Copy standalone user plugins into the payload's node_modules AND make
+    them resolvable.
 
     These are workspace members under packages/plugin/ in the harness repo.
     They produce tarballs during pack but are NOT dependencies of
-    @deepseek-ai/dsh, so pnpm deploy skips them. We copy them explicitly so
-    the cordis loader can resolve them at runtime on the device.
+    @deepseek-ai/dsh, so pnpm deploy skips them. Copying alone is not enough
+    for the plugins to take effect: boot-time healProfilesModuleFallback()
+    symlinks every package in the @deepseek-ai/dsh dependency closure into
+    $DSH_HOME/profiles/node_modules (the flat fallback the loader resolves
+    through from the profile directory). Plugins outside that closure never
+    get links, so their loader rows cannot resolve. Fix: append each plugin
+    name to node_modules/@deepseek-ai/dsh/package.json dependencies — a
+    post-deploy manifest edit the BFS then picks up. The mounting leg lives
+    in patches/android.patch.yml (- insert rows for both plugins).
     """
     upstream = os.environ.get("DSH_UPSTREAM", r"E:\code\deepseek-harness")
     src_root = os.path.join(upstream, "packages", "plugin")
@@ -560,6 +568,7 @@ def install_user_plugins(payload):
         return
     nm = os.path.join(payload, "node_modules")
     import shutil as _shutil
+    copied = []
     for name in os.listdir(src_root):
         pkg_json = os.path.join(src_root, name, "package.json")
         if not os.path.isfile(pkg_json):
@@ -571,7 +580,24 @@ def install_user_plugins(payload):
             os.path.join(src_root, name), dst,
             ignore=_shutil.ignore_patterns("node_modules", ".vite*", "tests", "*.spec.*"),
         )
+        copied.append(name)
         print(f"copied user plugin {name} -> {dst}")
+    if not copied:
+        return
+    app_manifest_path = os.path.join(nm, "@deepseek-ai", "dsh", "package.json")
+    with open(app_manifest_path, encoding="utf-8") as handle:
+        manifest = json.load(handle)
+    deps = manifest.setdefault("dependencies", {})
+    changed = False
+    for name in copied:
+        if deps.get(name) != "*":
+            deps[name] = "*"
+            changed = True
+    if changed:
+        with open(app_manifest_path, "w", encoding="utf-8", newline="\n") as handle:
+            json.dump(manifest, handle, indent=2)
+            handle.write("\n")
+        print(f"registered user plugins into dsh manifest dependencies: {', '.join(sorted(copied))}")
 
 
 def main():
