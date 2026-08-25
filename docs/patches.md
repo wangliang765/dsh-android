@@ -58,9 +58,29 @@
 | permission | disabled | presets 强制受限执行器（"does not confine" fail-loud）；danger-full-access 下无意义，DSH_PERMISSION_MODE 切 never |
 | directory-picker | 钉 browse 变体 | auto 解析可达 native 变体（koffi Win32 对话框） |
 | bash-local | insert | 本地子进程执行器（timeoutMs 60000）；两执行器族注册同名 bash 服务，配方必须完整 |
+| dsh-plugin-toggle | insert | 用户插件：浏览器热启停 loader 条目（/dsh-plugin-toggle/list,set 路由） |
+| dsh-vision-bridge | insert | 用户插件：analyze_image 工具，把图片发给视觉路由换文字结论 |
 
 注意演进：早期版本曾禁用 attachment-local（sharp 无法加载时代）；自 sharp v2 起改为
 **保持挂载**（host-apiproxy 依赖 attachments 服务，禁用会饿死依赖树）。
+
+### 用户插件生效的两条腿（缺一不可）
+
+fe403fc 只把插件拷进 payload node_modules——文件在场 ≠ 被装配：
+
+1. **解析腿**：boot 时 `healProfilesModuleFallback`（dsh-app-boot）按
+   @deepseek-ai/dsh 清单的**依赖闭包** BFS，把每个可达包 symlink 进
+   `$DSH_HOME/profiles/node_modules` 平铺回退目录；loader 从 profile 目录解析
+   条目名时靠父目录行走命中它。闭包外的包永远没有链接。
+   → `install_user_plugins()` 把插件名追加进 `node_modules/@deepseek-ai/dsh/
+   package.json` 的 dependencies（部署后清单编辑），BFS 自动建链。
+2. **挂载腿**：android.patch.yml 的 `- insert:` 行。无行 = 包在 node_modules 里
+   惰性存在，loader 树中根本没有条目。
+
+PC 冒烟注意：Windows 宿主上 android.patch.yml 会让 pwsh-sandbox（win32 门控行）
+等待被禁用的 sandbox 服务而启动失败——设备上该行不存在，无此冲突。本地冒烟用
+`assembly/smoke-probe2.mjs`（SMOKE_EXTRA 环境变量传额外覆盖层禁掉 pwsh-sandbox），
+通过 `/dsh-plugin-toggle/list` 自检挂载结果。
 
 ## 三、App 层运行时自举（DshService.java）
 
