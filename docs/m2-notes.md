@@ -60,4 +60,10 @@ Android 系统能力：NotificationManager / ClipboardManager / ACTION_SEND choo
 ## 验收清单（PLAN.md M2）
 
 - [ ] 模型自主调用 ≥4 个安卓工具并拿到结构化结果（驱动脚本 assembly/m2-accept.mjs）
-- [ ] 权限拒绝/超时路径有干净的工具错误反馈（PICK_TIMEOUT / BRIDGE_UNREACHABLE）
+- [x] 权限拒绝/超时路径有干净的工具错误反馈：
+  - NOTIFICATION_DENIED——API 33+ 未授 POST_NOTIFICATIONS 时主动检测返回
+    （系统默认静默丢弃，必须显式探测，否则模型以为发成功了）
+  - CLIPBOARD_BLOCKED——Android 10+ 后台焦点限制，isAppForeground 探测
+    （IMPORTANCE_FOREGROUND 判定），拒绝而非回吐陈旧空数据
+  - PICK_TIMEOUT——SAF 用户 120s 未选择
+  - BRIDGE_UNREACHABLE / BRIDGE_TIMEOUT / BRIDGE_ERROR:<code>——插件侧统一封装
