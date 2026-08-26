@@ -152,6 +152,16 @@ public class BridgeServer {
     // ── endpoints ────────────────────────────────────────────────────────
 
     private void handleNotify(Socket socket, JSONObject req) throws Exception {
+        // Android 13+ silently drops posts without POST_NOTIFICATIONS; surface
+        // the denial instead of reporting success into the void.
+        if (Build.VERSION.SDK_INT >= 33 && owner.checkSelfPermission(
+                android.Manifest.permission.POST_NOTIFICATIONS)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            respond(socket, 200, err(
+                "POST_NOTIFICATIONS not granted; grant it in system settings to post notifications",
+                "NOTIFICATION_DENIED"));
+            return;
+        }
         String title = req.optString("title", "DSH");
         String text = req.optString("text", "");
         NotificationManager nm = owner.getSystemService(NotificationManager.class);
@@ -167,10 +177,32 @@ public class BridgeServer {
     }
 
     private void handleClipboardRead(Socket socket) throws Exception {
+        // Android 10+: only the focused app may read the clipboard; background
+        // reads yield stale/empty data. Deny cleanly instead of lying.
+        if (!isAppForeground()) {
+            respond(socket, 200, err(
+                "clipboard read requires the app to be in the foreground on Android 10+",
+                "CLIPBOARD_BLOCKED"));
+            return;
+        }
         ClipboardManager cm = (ClipboardManager) owner.getSystemService(Context.CLIPBOARD_SERVICE);
         ClipData clip = cm.getPrimaryClip();
         CharSequence text = clip != null && clip.getItemCount() > 0 ? clip.getItemAt(0).coerceToText(owner) : "";
         respond(socket, 200, okObj().put("text", text == null ? "" : text.toString()));
+    }
+
+    /** True while any of the app's activities is front-of-screen. */
+    private boolean isAppForeground() {
+        android.app.ActivityManager am = (android.app.ActivityManager) owner.getSystemService(Context.ACTIVITY_SERVICE);
+        java.util.List<android.app.ActivityManager.RunningAppProcessInfo> procs = am.getRunningAppProcesses();
+        if (procs == null) return false;
+        for (android.app.ActivityManager.RunningAppProcessInfo info : procs) {
+            if (info.uid == owner.getApplicationInfo().uid
+                && info.importance <= android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void handleClipboardWrite(Socket socket, JSONObject req) throws Exception {
