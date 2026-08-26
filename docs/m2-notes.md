@@ -1,6 +1,21 @@
 # M2 笔记：安卓原生工具（Bridge v1 + android-bridge-tools）
 
-状态：代码完成，装机验收进行中（2026-08-26）。
+状态：**验收通过（2026-08-26，realme RMX3888）——5/5 工具 + 拒绝路径证据。**
+
+## 真机验收结果
+
+解锁状态下（锁屏会冻结进程且剪贴板读被系统拒绝，见坑 7）：
+
+| 工具 | 证据 |
+|---|---|
+| android_device_info | "realme RMX3888 — Android 16 (SDK 36) — battery 100% (charging)" |
+| android_notify | 通知发布成功（id 60504），标题"M2 验收"出现在状态栏 |
+| android_clipboard_write | "Copied 20 characters to clipboard." |
+| android_clipboard_read | 回读 `DSH-M2-<时间戳>` 与写入值逐字节一致 |
+| android_share_text | 系统分享面板成功拉起并报告成功 |
+
+拒绝路径：锁屏态采集到 `BRIDGE_ERROR:CLIPBOARD_BLOCKED` 干净结构化反馈，
+模型正确引导用户把应用带到前台后重试成功。
 
 ## 架构
 
@@ -56,6 +71,22 @@ Android 系统能力：NotificationManager / ClipboardManager / ACTION_SEND choo
    /dsh-plugin-toggle/list 的 phase=active 为准。
 6. **node -e 冒烟不可用**：HMR 条目 apply 时 resolve(process.argv[1])，
    -e 模式 argv[1] 为 undefined 直接炸。必须用真实脚本文件跑 probe2。
+7. **锁屏 = 进程冻结 + 剪贴板拒绝**：ColorOS 锁屏后强制 ~10s 休眠覆盖
+   （mUserActivityTimeoutOverrideFromWindowManager=10000），FGS 也照冻，
+   TCP 内核代答握手但无数据；解锁前台则一切正常。剪贴板读在锁屏态被
+   isAppForeground 正确拒绝（CLIPBOARD_BLOCKED）——这本身就是设计行为。
+8. **Bridge 信封的 ok 字段会污染 output 校验**：Kotlin 返回 {ok:true,...}，
+   工具 execute 必须剥掉 ok 再返回，否则 additionalProperties:false 的
+   output schema 报 "value.ok is not a declared property"（INVALID_TOOL_OUTPUT）。
+9. **null vs 缺键**：output schema 声明 integer 的可选字段收到 null 同样违规；
+   Kotlin 侧未知值应省略键而非放 JSONObject.NULL。
+
+## 热部署迭代技巧
+
+插件 JS 改动无需重打 zip/APK：push 单文件到
+`files/runtime/node_modules/@dsh-external/<name>/lib/index.js` +
+force-stop 重启应用即可（extractAssets 只看 APK lastUpdateTime 指纹）。
+整轮迭代 <1 分钟；最终产物固化时再走完整构建链。
 
 ## 验收清单（PLAN.md M2）
 

@@ -276,9 +276,10 @@ public class BridgeServer {
             .put("model", Build.MODEL)
             .put("androidVersion", Build.VERSION.RELEASE)
             .put("sdkInt", Build.VERSION.SDK_INT)
-            .put("batteryPercent", percent > 0 ? percent : JSONObject.NULL)
             .put("charging", charging)
             .put("serviceAlive", true);
+        // Omit (not null) when unknown: output schemas reject null for integer.
+        if (percent > 0) out.put("batteryPercent", percent);
         respond(socket, 200, out);
     }
 

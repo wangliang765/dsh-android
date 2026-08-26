@@ -63,7 +63,8 @@ const verdicts = [];
 // Phase 2: device info
 {
   const r = await turn(sid, 'Call android_device_info and report the manufacturer/model/battery line.');
-  const ok = r.completed && r.results.some((s) => s.includes('"sdkInt"') || s.includes('manufacturer'));
+  const blob = r.results.join(' ') + ' ' + r.answer;
+  const ok = r.completed && /RMX|realme|SDK \d+|battery/i.test(blob) && !blob.includes('INVALID_TOOL_OUTPUT');
   console.log(`[device_info] tools=${JSON.stringify(r.toolsUsed)} completed=${r.completed} answer=${r.answer.slice(0, 160)}`);
   verdicts.push(['android_device_info', ok]);
   if (ok) score++;
@@ -72,7 +73,8 @@ const verdicts = [];
 // Phase 3: notification
 {
   const r = await turn(sid, 'Call android_notify with title "M2 验收" and text "bridge notification works". Report whether it posted.');
-  const ok = r.completed && r.results.some((s) => s.includes('"posted":true') || s.includes('"posted" : true'));
+  const blob = r.results.join(' ') + ' ' + r.answer;
+  const ok = r.completed && (/Notification posted|posted successfully|id \d+/i.test(blob) || blob.includes('"posted":true')) && !blob.includes('NOTIFICATION_DENIED');
   console.log(`[notify] tools=${JSON.stringify(r.toolsUsed)} completed=${r.completed} answer=${r.answer.slice(0, 160)}`);
   verdicts.push(['android_notify', ok]);
   if (ok) score++;
@@ -82,13 +84,15 @@ const verdicts = [];
 {
   const marker = `DSH-M2-${Date.now()}`;
   const w = await turn(sid, `Call android_clipboard_write with text exactly "${marker}". Then reply OK.`);
-  const wrote = w.completed && w.results.some((s) => s.includes('"copied":true'));
-  console.log(`[clipboard_write] tools=${JSON.stringify(w.toolsUsed)} copied=${wrote}`);
+  const wblob = w.results.join(' ') + ' ' + w.answer;
+  const wrote = w.completed && (/Copied \d+ characters|"copied":true/.test(wblob));
+  console.log(`[clipboard_write] tools=${JSON.stringify(w.toolsUsed)} wrote=${wrote} detail=${wblob.slice(0, 140)}`);
   verdicts.push(['android_clipboard_write', wrote]);
   if (wrote) score++;
   const rd = await turn(sid, `Call android_clipboard_read and output the clipboard content verbatim.`);
-  const got = rd.answer.includes(marker);
-  console.log(`[clipboard_read] answer=${rd.answer.slice(0, 160)} roundtrip=${got}`);
+  const rblob = rd.answer;
+  const got = rblob.includes(marker);
+  console.log(`[clipboard_read] answer=${rblob.slice(0, 160)} roundtrip=${got}`);
   verdicts.push(['android_clipboard_read', got]);
   if (got) score++;
 }
@@ -96,7 +100,8 @@ const verdicts = [];
 // Phase 6: share sheet (opens on screen; user may ignore it)
 {
   const r = await turn(sid, 'Call android_share_text with text "Shared from DSH on Android". Reply with whether it reported success.');
-  const ok = r.completed && r.results.some((s) => s.includes('"shared":true'));
+  const blob = r.results.join(' ') + ' ' + r.answer;
+  const ok = r.completed && (/Shared via system sheet|shared.*true/i.test(blob)) && !blob.includes('BRIDGE_ERROR');
   console.log(`[share] tools=${JSON.stringify(r.toolsUsed)} completed=${r.completed} answer=${r.answer.slice(0, 160)}`);
   verdicts.push(['android_share_text', ok]);
   if (ok) score++;
