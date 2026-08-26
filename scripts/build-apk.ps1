@@ -37,7 +37,7 @@ if ($LASTEXITCODE -ne 0) { throw "aapt2 link failed" }
 Write-Host '== javac =='
 $javaSources = @(Get-ChildItem (Join-Path $App 'java') -Recurse -Filter '*.java' | ForEach-Object { $_.FullName })
 $genSources = @(Get-ChildItem "$Build\gen" -Recurse -Filter '*.java' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
-javac -classpath $PlatformJar -d "$Build\classes" ($javaSources + $genSources)
+javac -encoding UTF-8 -classpath $PlatformJar -d "$Build\classes" ($javaSources + $genSources)
 if ($LASTEXITCODE -ne 0) { throw "javac failed" }
 
 Write-Host '== d8 =='

@@ -33,7 +33,8 @@ import java.util.zip.ZipInputStream;
  */
 public class DshService extends Service {
     private static final String TAG = "dsh-spike";
-    private static final String CHANNEL_ID = "dsh";
+    /** Shared by the FGS notification and model-posted bridge notifications. */
+    static final String CHANNEL_ID = "dsh";
     private static final int NOTIFICATION_ID = 42;
     private static final Pattern READY = Pattern.compile("dsh web: (http://127\\.0\\.0\\.1:\\d+)");
     private static final Pattern PORT = Pattern.compile("--port (\\d+)");
@@ -46,6 +47,8 @@ public class DshService extends Service {
     private Process process;
     /** API key passed through the start intent (headless test seam). */
     private volatile String intentApiKey;
+    /** M2 native-capability bridge the toolkit plugin calls over loopback. */
+    private BridgeServer bridge;
 
     @Override
     public IBinder onBind(Intent intent) {
@@ -56,6 +59,8 @@ public class DshService extends Service {
     public void onCreate() {
         super.onCreate();
         startForegroundTyped();
+        bridge = new BridgeServer(this);
+        bridge.start();
         new Thread(this::run, "dsh-boot").start();
     }
 
@@ -69,6 +74,7 @@ public class DshService extends Service {
 
     @Override
     public void onDestroy() {
+        if (bridge != null) bridge.stop();
         if (process != null) process.destroy();
         super.onDestroy();
     }
@@ -152,6 +158,9 @@ public class DshService extends Service {
             env.put("SSL_CERT_FILE", new File(filesDir, "etc/tls/cert.pem").getAbsolutePath());
             env.put("DEEPSEEK_API_KEY", resolveApiKey());
             env.put("DSH_PERMISSION_MODE", "danger-full-access");
+            // The toolkit plugin (@dsh-external/android-bridge-tools) reads this
+            // to reach the native-capability BridgeServer on loopback.
+            env.put("DSH_ANDROID_BRIDGE_PORT", "3081");
             env.put("DSH_TELEMETRY_DISABLED", "1");
             env.put("LANG", "en_US.UTF-8");
             env.put("LC_ALL", "en_US.UTF-8");
