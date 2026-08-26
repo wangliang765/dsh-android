@@ -113,15 +113,23 @@ E:\code\dsh-android\
 - [x] shell 工具调用不再出现 `SANDBOX_UNAVAILABLE`（patch 生效：bash-local 挂载，启动树无 sandbox 依赖错误）
 - [x] 真机多轮对话证据（bash/fs/web 各一例）（2026-08-26）
 
-### M2 — 安卓原生工具（预计 1 周）
+### M2 — 安卓原生工具（预计 1 周）✅ 完成（2026-08-26 真机验收，见 docs/m2-notes.md）
 任务：
-1. Bridge v1（低风险批）：系统通知、剪贴板、分享接入（ACTION_SEND→新会话）、SAF 文件选择回拷工作区。
-2. `plugins\android-bridge-tools\` toolkit 插件：工具 schema 模型视角措辞、结果渲染意图声明（对齐上游 cookbook 的 UI render intent 规范）。
-3. Bridge v2（权限批，渠道定案后）：相机拍照回传、联系人、短信。
+1. Bridge v1（低风险批）：系统通知、剪贴板、分享接入（ACTION_SEND→新会话）、SAF 文件选择回拷工作区。→ ✅ 完成 + 定向分享增强（packageName 直达目标 App 分享流 + share/targets 枚举）
+2. `plugins\android-bridge-tools\` toolkit 插件：工具 schema 模型视角措辞、结果渲染意图声明（对齐上游 cookbook 的 UI render intent 规范）。→ ✅ 17 工具（@dsh-external/android-bridge-tools）
+3. 第一档扩展（零权限）：launch_app/list_apps/open_url/volume×2/torch/vibrate/brightness/dial/set_alarm。→ ✅ 10/10 验收
+4. Bridge v2（权限批，渠道定案后）：相机拍照回传、联系人、短信。→ ⏳ 移入 M5 按需
 
 验收：
-- [ ] 模型能自主调用 ≥4 个安卓工具并拿到结构化结果；
-- [ ] 权限拒绝路径有干净的工具错误反馈（不是崩溃/挂起）。
+- [x] 模型能自主调用 ≥4 个安卓工具并拿到结构化结果（5/5 + 10/10 两轮真机证据）；
+- [x] 权限拒绝路径有干净的工具错误反馈（CLIPBOARD_BLOCKED / NOTIFICATION_DENIED / PICK_TIMEOUT / ColorOS 三项 special-permission 全部结构化转述，模型正确引导用户）。
+
+### M5 — 设备操控（调研后新增，待排期）
+基于 E:\code\参考 八个开源 agent 项目的调研结论（docs/m2-notes.md 附调研摘要）：
+1. 无障碍桥：AccessibilityService → Bridge `/a11y/*`（剪枝树快照+元素序号索引/gesture/input/screenshot），解锁 AI 操作微信/QQ 等 UI；
+2. Shizuku 扩展：bindUserService + AIDL shell 服务（免 root），pm install/grant、uiautomator dump、am force-stop；顺带自动授予第一档被拒的三项 special permission；
+3. 安全四层：工具级审批门 + 命令硬黑名单 + LoopGuard 同签名去重 + turn 墙钟预算（借鉴 rikkahub-agent）；
+4. after 信封规范：动作后自动附 {foreground_pkg, screen_changed}，省一半观察性调用。
 
 ### M3 — 打磨与固化（时间随 M2 收尾）
 - FGS 生命周期完善（Doze/厂商省电白名单指引）、崩溃自动重启与日志导出、密钥安全审查、

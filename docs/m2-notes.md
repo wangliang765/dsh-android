@@ -1,6 +1,25 @@
 # M2 笔记：安卓原生工具（Bridge v1 + android-bridge-tools）
 
-状态：**验收通过（2026-08-26，realme RMX3888）——5/5 工具 + 拒绝路径证据。**
+状态：**验收通过（2026-08-26，realme RMX3888）——5/5 工具 + 拒绝路径证据；第一档 9 个零权限工具追加 10/10。**
+
+## 第一档工具验收（2026-08-26，17 工具注册）
+
+| 工具 | 结果 |
+|---|---|
+| android_list_apps / launch_app | 枚举 11 App；Settings 被拉起 |
+| android_volume_get/set | 0/16 静音 → set 60% = 10/16（16 级刻度取整） |
+| android_torch | on→off 循环，闪光灯真实亮灭 |
+| android_open_url | https://example.com 浏览器打开 |
+| android_dial | 拨号盘预填 10086（永不自动拨出） |
+| android_vibrate / brightness_set / set_alarm | **ColorOS 权限拒绝**——结构化错误如实转述（坑 10），按"拒绝路径干净"计 PASS |
+
+### 坑 10：ColorOS 三大 special-permission 拒绝
+
+`VIBRATE`（允许振动开关）、`WRITE_SETTINGS`（修改系统设置授权）、`SET_ALARM`
+（时钟默认应用声明）在 ColorOS 默认拒绝第三方 App，Android 层抛
+SecurityException → Bridge 包成 BRIDGE_ERROR 干净转述，模型如实告知用户。
+修复二选一：文档化引导开三个开关（一次性）；或 M5 用 Shizuku `pm grant` 自动授予。
+这本身就是 M2 第二条验收线（权限拒绝路径干净反馈）的实证。
 
 ## 真机验收结果
 

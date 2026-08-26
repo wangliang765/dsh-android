@@ -7,6 +7,7 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.net.Uri;
 import android.os.BatteryManager;
 import android.os.Build;
 import android.util.Log;
@@ -145,8 +146,28 @@ public class BridgeServer {
                 handlePickFile(socket, req); return;
             case "/device/info":
                 handleDeviceInfo(socket); return;
+            case "/app/launch":
+                handleAppLaunch(socket, req); return;
+            case "/app/list":
+                handleAppList(socket); return;
+            case "/url/open":
+                handleOpenUrl(socket, req); return;
+            case "/volume/set":
+                handleVolumeSet(socket, req); return;
+            case "/volume/get":
+                handleVolumeGet(socket); return;
+            case "/torch/set":
+                handleTorch(socket, req); return;
+            case "/vibrate":
+                handleVibrate(socket, req); return;
+            case "/brightness/set":
+                handleBrightness(socket, req); return;
+            case "/dial":
+                handleDial(socket, req); return;
+            case "/alarm/set":
+                handleAlarm(socket, req); return;
             case "/health":
-                respond(socket, 200, okObj().put("service", "android-bridge").put("version", 1)); return;
+                respond(socket, 200, okObj().put("service", "android-bridge").put("version", 2)); return;
             default:
                 respond(socket, 404, err("unknown endpoint " + path, "UNKNOWN_ENDPOINT"));
         }
@@ -338,6 +359,178 @@ public class BridgeServer {
         // Omit (not null) when unknown: output schemas reject null for integer.
         if (percent > 0) out.put("batteryPercent", percent);
         respond(socket, 200, out);
+    }
+
+    // ── tier-1 endpoints (zero extra permissions) ────────────────────────
+
+    /** Launch an app by package via its launch intent. */
+    private void handleAppLaunch(Socket socket, JSONObject req) throws Exception {
+        String pkg = req.optString("packageName", "").trim();
+        if (pkg.isEmpty()) { respond(socket, 200, err("packageName is required", "BAD_ARGS")); return; }
+        Intent launch = owner.getPackageManager().getLaunchIntentForPackage(pkg);
+        if (launch == null) {
+            respond(socket, 200, err("package " + pkg + " is not installed or not launchable", "APP_NOT_FOUND"));
+            return;
+        }
+        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        owner.startActivity(launch);
+        respond(socket, 200, okObj().put("launched", true).put("packageName", pkg));
+    }
+
+    /** Enumerate launchable apps: label + packageName, sorted by label. */
+    private void handleAppList(Socket socket) throws Exception {
+        Intent probe = new Intent(Intent.ACTION_MAIN);
+        probe.addCategory(Intent.CATEGORY_LAUNCHER);
+        java.util.List<android.content.pm.ResolveInfo> infos =
+            owner.getPackageManager().queryIntentActivities(probe, 0);
+        java.util.TreeMap<String, String> byPackage = new java.util.TreeMap<>();
+        for (android.content.pm.ResolveInfo info : infos) {
+            String label;
+            try { label = String.valueOf(info.loadLabel(owner.getPackageManager())); }
+            catch (Throwable t) { label = info.activityInfo.packageName; }
+            if (!byPackage.containsKey(info.activityInfo.packageName)) {
+                byPackage.put(info.activityInfo.packageName, label);
+            }
+        }
+        JSONArray apps = new JSONArray();
+        for (java.util.Map.Entry<String, String> entry : byPackage.entrySet()) {
+            JSONObject app = new JSONObject();
+            app.put("packageName", entry.getKey());
+            app.put("label", entry.getValue());
+            apps.put(app);
+        }
+        respond(socket, 200, okObj().put("apps", apps).put("count", apps.length()));
+    }
+
+    /** Open a URL in the default (or named) browser via ACTION_VIEW. */
+    private void handleOpenUrl(Socket socket, JSONObject req) throws Exception {
+        String url = req.optString("url", "").trim();
+        Uri uri = Uri.parse(url);
+        if (uri.getScheme() == null || uri.getScheme().isEmpty()) {
+            respond(socket, 200, err("url must include a scheme (http://…)", "BAD_URL"));
+            return;
+        }
+        Intent view = new Intent(Intent.ACTION_VIEW, uri);
+        view.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        owner.startActivity(view);
+        respond(socket, 200, okObj().put("opened", true).put("url", url));
+    }
+
+    private void handleVolumeSet(Socket socket, JSONObject req) throws Exception {
+        android.media.AudioManager am = (android.media.AudioManager) owner.getSystemService(Context.AUDIO_SERVICE);
+        int percent = Math.max(0, Math.min(100, req.optInt("percent", -1)));
+        if (percent < 0) { respond(socket, 200, err("percent (0-100) is required", "BAD_ARGS")); return; }
+        int max = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC);
+        int prev = am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC);
+        am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC,
+            Math.round(percent * max / 100f), 0);
+        respond(socket, 200, okObj().put("applied", true)
+            .put("previousLevel", prev).put("level", Math.round(percent * max / 100f)).put("maxLevel", max));
+    }
+
+    private void handleVolumeGet(Socket socket) throws Exception {
+        android.media.AudioManager am = (android.media.AudioManager) owner.getSystemService(Context.AUDIO_SERVICE);
+        respond(socket, 200, okObj()
+            .put("level", am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC))
+            .put("maxLevel", am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC))
+            .put("ringerMode", ringerName(am.getRingerMode())));
+    }
+
+    private static String ringerName(int mode) {
+        switch (mode) {
+            case android.media.AudioManager.RINGER_MODE_SILENT: return "silent";
+            case android.media.AudioManager.RINGER_MODE_VIBRATE: return "vibrate";
+            default: return "normal";
+        }
+    }
+
+    private boolean torchOn;
+
+    /** Toggle or set the camera flash torch. Fails cleanly when no flash unit. */
+    private void handleTorch(Socket socket, JSONObject req) throws Exception {
+        android.hardware.camera2.CameraManager cm = (android.hardware.camera2.CameraManager) owner.getSystemService(Context.CAMERA_SERVICE);
+        String cameraId = null;
+        for (String id : cm.getCameraIdList()) {
+            if (cm.getCameraCharacteristics(id)
+                    .get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) == Boolean.TRUE) {
+                cameraId = id; break;
+            }
+        }
+        if (cameraId == null) {
+            respond(socket, 200, err("this device has no camera flash unit", "NO_TORCH"));
+            return;
+        }
+        boolean on = req.has("on") ? req.getBoolean("on") : !torchOn;
+        cm.setTorchMode(cameraId, on);
+        torchOn = on;
+        respond(socket, 200, okObj().put("torchOn", on));
+    }
+
+    /** One-shot vibration burst; duration ms capped at 10s. */
+    private void handleVibrate(Socket socket, JSONObject req) throws Exception {
+        android.os.Vibrator vibrator = (android.os.Vibrator) owner.getSystemService(Context.VIBRATOR_SERVICE);
+        long ms = Math.max(50, Math.min(10_000, req.optLong("durationMs", 300)));
+        if (Build.VERSION.SDK_INT >= 26) vibrator.vibrate(android.os.VibrationEffect.createOneShot(ms, android.os.VibrationEffect.DEFAULT_AMPLITUDE));
+        else vibrator.vibrate(ms);
+        respond(socket, 200, okObj().put("vibrated", true).put("durationMs", ms));
+    }
+
+    /** Set screen brightness 0-100 (manual mode); restores auto when asked. */
+    private void handleBrightness(Socket socket, JSONObject req) throws Exception {
+        android.provider.Settings.System.putInt(owner.getContentResolver(),
+            android.provider.Settings.System.SCREEN_BRIGHTNESS_MODE,
+            android.provider.Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL);
+        Integer percent = null;
+        boolean auto = req.optBoolean("auto", false);
+        if (!auto) {
+            percent = Math.max(1, Math.min(100, req.optInt("percent", -1)));
+            if (percent < 0) { respond(socket, 200, err("percent (1-100) or auto:true is required", "BAD_ARGS")); return; }
+            android.provider.Settings.System.putInt(owner.getContentResolver(),
+                android.provider.Settings.System.SCREEN_BRIGHTNESS, percent * 255 / 100);
+        } else {
+            android.provider.Settings.System.putInt(owner.getContentResolver(),
+                android.provider.Settings.System.SCREEN_BRIGHTNESS_MODE,
+                android.provider.Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC);
+        }
+        respond(socket, 200, okObj().put("applied", true).putOpt("percent", percent == null ? null : percent).put("auto", auto));
+    }
+
+    /** Open the dialer pre-filled (never dials — no CALL_PHONE needed). */
+    private void handleDial(Socket socket, JSONObject req) throws Exception {
+        String number = req.optString("number", "").trim();
+        if (number.isEmpty()) { respond(socket, 200, err("number is required", "BAD_ARGS")); return; }
+        Intent dial = new Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + number));
+        dial.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        owner.startActivity(dial);
+        respond(socket, 200, okObj().put("dialerOpened", true).put("number", number));
+    }
+
+    /** Set an alarm (or countdown timer with seconds) via the clock app. */
+    private void handleAlarm(Socket socket, JSONObject req) throws Exception {
+        Intent alarm;
+        String label = req.optString("label", "DSH");
+        int seconds = req.optInt("seconds", -1);
+        if (seconds > 0) {
+            alarm = new Intent(android.provider.AlarmClock.ACTION_SET_TIMER);
+            alarm.putExtra(android.provider.AlarmClock.EXTRA_LENGTH, seconds);
+            alarm.putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, label);
+            alarm.putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, false);
+        } else {
+            int hour = req.optInt("hour", -1), minute = req.optInt("minute", -1);
+            if (hour < 0 || minute < 0) { respond(socket, 200, err("either seconds>0 or hour+minute is required", "BAD_ARGS")); return; }
+            java.util.Calendar cal = java.util.Calendar.getInstance();
+            cal.set(java.util.Calendar.HOUR_OF_DAY, hour);
+            cal.set(java.util.Calendar.MINUTE, minute);
+            if (cal.getTimeInMillis() <= System.currentTimeMillis()) cal.add(java.util.Calendar.DAY_OF_YEAR, 1);
+            alarm = new Intent(android.provider.AlarmClock.ACTION_SET_ALARM);
+            alarm.putExtra(android.provider.AlarmClock.EXTRA_HOUR, cal.get(java.util.Calendar.HOUR_OF_DAY));
+            alarm.putExtra(android.provider.AlarmClock.EXTRA_MINUTES, minute);
+            alarm.putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, label);
+            alarm.putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, false);
+        }
+        alarm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        owner.startActivity(alarm);
+        respond(socket, 200, okObj().put("scheduled", true).put("kind", seconds > 0 ? "timer" : "alarm").put("label", label));
     }
 
     // ── plumbing ─────────────────────────────────────────────────────────
