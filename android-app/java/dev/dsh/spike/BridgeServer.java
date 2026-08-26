@@ -21,6 +21,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
@@ -138,6 +139,8 @@ public class BridgeServer {
                 handleClipboardWrite(socket, req); return;
             case "/share/text":
                 handleShareText(socket, req); return;
+            case "/share/targets":
+                handleShareTargets(socket); return;
             case "/pick/file":
                 handlePickFile(socket, req); return;
             case "/device/info":
@@ -216,18 +219,72 @@ public class BridgeServer {
      * ACTION_SEND chooser launched from the service context needs
      * FLAG_ACTIVITY_NEW_TASK; the chooser runs in its own task and this
      * endpoint answers right away (the user completes/dismisses it there).
+     * When `packageName` is set, the sheet is bypassed and the send intent
+     * targets that app directly (still lands in its own compose UI — no
+     * public API exists to auto-pick a friend/chat inside WeChat/QQ).
      */
     private void handleShareText(Socket socket, JSONObject req) throws Exception {
         String text = req.optString("text", "");
         String subject = req.has("subject") && !req.isNull("subject") ? req.getString("subject") : null;
+        String pkg = req.has("packageName") && !req.isNull("packageName") ? req.getString("packageName").trim() : "";
         Intent send = new Intent(Intent.ACTION_SEND);
         send.setType("text/plain");
         send.putExtra(Intent.EXTRA_TEXT, text);
         if (subject != null) send.putExtra(Intent.EXTRA_SUBJECT, subject);
-        Intent chooser = Intent.createChooser(send, "Share via");
-        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        owner.startActivity(chooser);
-        respond(socket, 200, okObj().put("shared", true));
+        Intent launch;
+        boolean targeted;
+        if (!pkg.isEmpty()) {
+            // Validate the target really handles ACTION_SEND text/plain before
+            // launching; an unknown package would crash with ActivityNotFound.
+            java.util.List<android.content.pm.ResolveInfo> candidates =
+                owner.getPackageManager().queryIntentActivities(send, 0);
+            boolean found = false;
+            for (android.content.pm.ResolveInfo info : candidates) {
+                if (pkg.equals(info.activityInfo.packageName)) { found = true; break; }
+            }
+            if (!found) {
+                respond(socket, 200, err("package " + pkg + " does not accept shared text", "SHARE_TARGET_UNAVAILABLE"));
+                return;
+            }
+            send.setPackage(pkg);
+            launch = send;
+            targeted = true;
+        } else {
+            launch = Intent.createChooser(send, "Share via");
+            targeted = false;
+        }
+        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        owner.startActivity(launch);
+        respond(socket, 200, okObj().put("shared", true)
+            .put("targeted", targeted)
+            .putOpt("packageName", targeted ? pkg : null));
+    }
+
+    /**
+     * Enumerate installed apps whose share UI accepts text/plain, so the model
+     * can offer concrete android_share_text packageName choices. Returns the
+     * deduplicated set of packages with their user-visible labels, sorted.
+     */
+    private void handleShareTargets(Socket socket) throws Exception {
+        Intent probe = new Intent(Intent.ACTION_SEND);
+        probe.setType("text/plain");
+        java.util.List<android.content.pm.ResolveInfo> infos =
+            owner.getPackageManager().queryIntentActivities(probe, 0);
+        java.util.TreeMap<String, String> byPackage = new java.util.TreeMap<>();
+        for (android.content.pm.ResolveInfo info : infos) {
+            String label;
+            try { label = String.valueOf(info.loadLabel(owner.getPackageManager())); }
+            catch (Throwable t) { label = info.activityInfo.packageName; }
+            byPackage.put(info.activityInfo.packageName, label);
+        }
+        JSONArray apps = new JSONArray();
+        for (java.util.Map.Entry<String, String> entry : byPackage.entrySet()) {
+            JSONObject app = new JSONObject();
+            app.put("packageName", entry.getKey());
+            app.put("label", entry.getValue());
+            apps.put(app);
+        }
+        respond(socket, 200, okObj().put("apps", apps).put("count", apps.length()));
     }
 
     /**
