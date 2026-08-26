@@ -1,7 +1,44 @@
-# M1 装配笔记（进行中）
+# M1 装配笔记（已完成）
 
 > 补丁与兼容性的**总账**在 [docs/patches.md](patches.md)（每个补丁的锚点、幂等标记、
 > 根因一句话、上游升级 SOP）；本文件保留各轮排查叙事。
+
+## M1 真机验收（2026-08-26，RMX3888 realme，全部通过 ✅）
+
+验收环境：最新 APK（runtime.zip 含全部四个用户插件），provider=vsllm/qwen3.8-max
+（reasoningEffort xhigh，compat.supportsDeveloperRole: false），
+agent-presets.default=router-standard。驱动脚本 assembly/m1-{accept,multiturn,image}.mjs
+（loopback RPC：session.create/prompt/history 信封 result.value.sessionId；
+history 参数 {sessionId, maxMessages:50} 返回 result.value.events[]）。
+
+| 项 | 证据 |
+|---|---|
+| 真实模型对话 | "Reply with exactly OK" → reasoning + "OK"，turn/end completed（2558 in / 35 out tokens） |
+| bash 工具 | `pwd && uname -m && echo DSH-BASH-OK` → `/data/data/dev.dsh.spike/files/workspace` + `aarch64`，isError:false |
+| fs write 工具 | m1-evidence.txt 落盘，内容与 bash 输出逐字节一致（cat 验证） |
+| web_search 工具 | 搜"Android 16 KB page size"返回带 android-developers.googleblog.com 引用的事实 |
+| read_image | 测试图（蓝底/橙圆/绿矩形/"DSH-M1"白字）像素级描述全对——sharp v2 垫片真机通过 |
+
+### 验收路上踩的坑（按发现顺序）
+
+1. **HyperOS 冻结连 FGS 一起冻**（Redmi）：应用退后台→cached freezer 冻整个进程，
+   TCP 握手内核代答但数据不回 → PC 侧请求超时。realme (ColorOS) 无此问题。
+   缓解：验收期间保持前台；根治归 M3（wakelock/电池优化白名单引导）。
+2. **PC 冒烟端口被上游开发服务器抢占**：31560 被 `pnpm dsh web`（tsx bin.ts）
+   占用，冒烟进程 EADDRINUSE 后台静默退出，测试全打到未打补丁的上游 koffi 真包上，
+   报"假阴性"koffi stub 错误。教训：**发请求前先验证监听 pid 的命令行归属**
+   （Get-CimInstance Win32_Process 看 CommandLine）；且绝不 kill 不明 node 进程
+   （那可能就是 DSH 本体）。
+3. **GUI 凭据落点**：Models 页写 `.dsh/.credentials.yaml` 的 refs（apiKeyEnv 名字→key），
+   与 settings.yaml 的 apiKeyEnv 字段对应；web-search-deepseek 默认引用
+   DEEPSEEK_API_KEY，不在 refs 里就 WEB_PROVIDER_CREDENTIAL_MISSING。
+4. **router-standard 首轮工具面收窄是设计行为**：首条用户消息分类（build/fix 关键词）→
+   weak/spec/react 三档核心集（如 react=[read,write,edit]+bash）；会话出现首个
+   tool/call 后提升为完整目录（含 web_search/prompt_loader_*/analyze_image/dev_*）。
+   验收脚本必须先发一条触发 bash 的 warmup 再测 web/image 工具。
+5. **agent-default-model 必须与 provider 的模型表一致**：cloud 下没有 qwen3.8-max
+   （UNKNOWN_MODEL）；vsllm/qwen3.8-max 只接受 low/medium/xhigh 档位
+   （UNSUPPORTED_REASONING_EFFORT）。
 
 ## 启动契约（已实证）
 
@@ -49,8 +86,8 @@ tool-bash/tool-fs 等 win32 门控行在 android 上天然落 POSIX 分支，无
 
 - [x] 模拟器端到端 READY + WebView 加载 GUI HTML（2026-08-23：HTTP 200，`__DSH_BOOT__` 38 插件名册，node 子进程稳定）
 - [x] adb forward 后 PC curl 首页（13080→3080）
-- [ ] 真机安装 + 真实 API key 对话验收（用户侧）
-- [ ] bash/fs/web 工具各一例的真实会话证据
+- [x] 真机安装 + 真实 API key 对话验收（2026-08-26，见上"M1 真机验收"）
+- [x] bash/fs/web 工具各一例的真实会话证据（2026-08-26，同上）
 
 ## 启动链最终形态（关键参数）
 

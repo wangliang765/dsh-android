@@ -100,18 +100,18 @@ E:\code\dsh-android\
 - [x] 16KB 对齐检查通过（静态 ELF 审计，17/17 = 16K）
 - [ ] 沙盒 syscall 失败证据落盘 `docs/m0-sandbox-probe.md`
 
-### M1 — 端到端（预计 1 周）✅ 模拟器完成（2026-08-23，见 docs/m1-notes.md）
+### M1 — 端到端（预计 1 周）✅ 完成（2026-08-26 真机验收，见 docs/m1-notes.md）
 任务：
 1. `assembly\`：从上游 checkout 构建 host/client 双面产物 + web dist，装配 assets 布局；首启解压到私有目录。→ 完成：worktree + stage + 231 tarball + pnpm deploy + complete_peers 补链（含 junction 下钻 zip）
 2. `patches\android.patch.yml`：完整 bash-local 换栈（照 base README 配方，两行都动，避免加载报错）。→ 完成并扩展：sandbox/permission 禁用、directory-picker 钉 browse、subprocess/attachment 保留 + 原生依赖 stub 化
-3. Kotlin FGS + ProcessBuilder 启动 `dsh web`，WebView 回环加载 GUI；DEEPSEEK_API_KEY 经 Keystore 注入。→ 完成（key 暂存 SharedPreferences，Keystore 迁移留 M3）
-4. 真机完成一次多轮对话：bash 工具（本机执行）、文件读写（工作区=私有目录）、web 检索各至少一例。→ ⏳ 待用户真机 + 真实 key
+3. Kotlin FGS + ProcessBuilder 启动 `dsh web`，WebView 回环加载 GUI；DEEPSEEK_API_KEY 经 Keystore 注入。→ 完成（key 暂存 SharedPreferences/GUI 凭据文件，Keystore 迁移留 M3）
+4. 真机完成一次多轮对话：bash 工具（本机执行）、文件读写（工作区=私有目录）、web 检索各至少一例。→ ✅ 全部通过（vsllm/qwen3.8-max xhigh；bash/fs-write/web_search/read_image 四工具真机证据）
 
 验收：
 - [x] 手机浏览器外无任何依赖，飞行模式外全程可用（除 LLM 网络本身）——模拟器实证，真机待复测
 - [x] 杀掉 App 重开，会话持久化恢复（存储行挂载 ✓；会话级复测随真机验收）
 - [x] shell 工具调用不再出现 `SANDBOX_UNAVAILABLE`（patch 生效：bash-local 挂载，启动树无 sandbox 依赖错误）
-- [ ] 真机多轮对话证据（bash/fs/web 各一例）
+- [x] 真机多轮对话证据（bash/fs/web 各一例）（2026-08-26）
 
 ### M2 — 安卓原生工具（预计 1 周）
 任务：
