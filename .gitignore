@@ -28,3 +28,7 @@ __pycache__/
 
 assembly/apk-build-log.txt
 assembly/rebuild-log.txt
+
+# ===== 签名密钥(debug keystore可由 keytool 重建,不入库)=====
+# build-apk.ps1 在缺失时自动 keytool -genkeypair 生成;debug 密钥按 Android 约定为公开密码 android
+assembly/debug.keystore

@@ -11,6 +11,9 @@
     <!-- Lets the user grant all-files access in Settings so the node runtime
          (same uid) can browse/read real phone storage, not just app-private dirs. -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
+    <!-- Package visibility (API 30+): without this the PM hides everything but
+         a default handful, so app_list sees ~11 of the dozens of installed apps. -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"/>
     <application
         android:label="DSH"
         android:extractNativeLibs="true"

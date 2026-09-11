@@ -655,7 +655,7 @@ def install_user_plugins(payload):
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         _shutil.copytree(
             src_dir, dst,
-            ignore=_shutil.ignore_patterns("node_modules", ".vite*", "tests", "*.spec.*"),
+            ignore=_shutil.ignore_patterns("node_modules", ".git", ".vite*", "tests", "*.spec.*"),
         )
         copied.append(pkg_name)
         print(f"copied user plugin {pkg_name} -> {dst}")
@@ -709,7 +709,7 @@ def vendor_missing_runtime_deps(src_dir, payload_nm, pkg_name):
                 # dep resolves by parent-walk from the payload root instead.
                 _shutil.copytree(
                     src, dst,
-                    ignore=_shutil.ignore_patterns("node_modules", ".vite*", "tests", "*.spec.*"),
+                    ignore=_shutil.ignore_patterns("node_modules", ".git", ".vite*", "tests", "*.spec.*"),
                 )
             except (_shutil.Error, OSError) as error:
                 _shutil.rmtree(dst, ignore_errors=True)

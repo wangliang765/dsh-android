@@ -1,6 +1,6 @@
 # M2 笔记：安卓原生工具（Bridge v1 + android-bridge-tools）
 
-状态：**验收通过（2026-08-26，realme RMX3888）——5/5 工具 + 拒绝路径证据；第一档 9 个零权限工具追加 10/10。**
+状态：**验收通过（2026-08-26，realme RMX3888）——5/5 基础工具 + 拒绝路径证据；第一档 10 项（AOSP normal 权限）全部产出正确结构化结果，其中 3 项被 ColorOS appops 拒绝、按"拒绝路径干净"计 PASS（自动化门槛设 ≥7，容忍厂商 ROM 差异）。**
 
 ## 第一档工具验收（2026-08-26，17 工具注册）
 
@@ -99,6 +99,16 @@ Android 系统能力：NotificationManager / ClipboardManager / ACTION_SEND choo
    output schema 报 "value.ok is not a declared property"（INVALID_TOOL_OUTPUT）。
 9. **null vs 缺键**：output schema 声明 integer 的可选字段收到 null 同样违规；
    Kotlin 侧未知值应省略键而非放 JSONObject.NULL。
+10. **包可见性第一道闸（manifest）**：targetSdk 30+ 默认看不到别的应用，
+    queryIntentActivities(LAUNCHER) 只回 ~11 个。必须声明
+    `QUERY_ALL_PACKAGES`（normal 安装权限，免手开）并改用
+    getInstalledApplications + getLaunchIntentForPackage 过滤枚举。
+11. **ColorOS 第二道闸（appops）**：即使清单权限 granted=true，
+    「获取应用列表」(GET_INSTALLED_APPS) appops 不为 allow 时
+    getInstalledApplications 只回自己（count=1）；adb shell 无
+    MANAGE_APP_OPS_MODES 代设不了，只能用户在 设置→应用→DSH→权限 手动打开。
+    已固化：/app/list 输出 visibilityRestricted + restrictionHint
+    （启动集 <30 判受限），插件 schema/render 把提示转述给模型，由模型引导用户。
 
 ## 热部署迭代技巧
 
@@ -109,7 +119,8 @@ force-stop 重启应用即可（extractAssets 只看 APK lastUpdateTime 指纹�
 
 ## 验收清单（PLAN.md M2）
 
-- [ ] 模型自主调用 ≥4 个安卓工具并拿到结构化结果（驱动脚本 assembly/m2-accept.mjs）
+- [x] 模型自主调用 ≥4 个安卓工具并拿到结构化结果（驱动脚本 assembly/m2-accept.mjs；
+  两轮真机：Bridge v1 5/5 + 第一档 10/10，其中 3 项为 ColorOS 拒绝路径计 PASS）
 - [x] 权限拒绝/超时路径有干净的工具错误反馈：
   - NOTIFICATION_DENIED——API 33+ 未授 POST_NOTIFICATIONS 时主动检测返回
     （系统默认静默丢弃，必须显式探测，否则模型以为发成功了）

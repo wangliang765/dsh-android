@@ -117,11 +117,11 @@ E:\code\dsh-android\
 任务：
 1. Bridge v1（低风险批）：系统通知、剪贴板、分享接入（ACTION_SEND→新会话）、SAF 文件选择回拷工作区。→ ✅ 完成 + 定向分享增强（packageName 直达目标 App 分享流 + share/targets 枚举）
 2. `plugins\android-bridge-tools\` toolkit 插件：工具 schema 模型视角措辞、结果渲染意图声明（对齐上游 cookbook 的 UI render intent 规范）。→ ✅ 17 工具（@dsh-external/android-bridge-tools）
-3. 第一档扩展（零权限）：launch_app/list_apps/open_url/volume×2/torch/vibrate/brightness/dial/set_alarm。→ ✅ 10/10 验收
+3. 第一档扩展（AOSP normal 权限；厂商 ROM 可能额外加闸）：launch_app/list_apps/open_url/volume×2/torch/vibrate/brightness/dial/set_alarm。→ ✅ 10/10 全部产出正确结构化结果（其中 vibrate/brightness/set_alarm 在 ColorOS 被 appops 拒绝，按"拒绝路径干净"计 PASS；自动化门槛设 ≥7，容忍厂商 ROM 差异）
 4. Bridge v2（权限批，渠道定案后）：相机拍照回传、联系人、短信。→ ⏳ 移入 M5 按需
 
 验收：
-- [x] 模型能自主调用 ≥4 个安卓工具并拿到结构化结果（5/5 + 10/10 两轮真机证据）；
+- [x] 模型能自主调用 ≥4 个安卓工具并拿到结构化结果（5/5 + 10/10 两轮真机证据；10/10 中 3 项为厂商 ROM 拒绝路径计 PASS）；
 - [x] 权限拒绝路径有干净的工具错误反馈（CLIPBOARD_BLOCKED / NOTIFICATION_DENIED / PICK_TIMEOUT / ColorOS 三项 special-permission 全部结构化转述，模型正确引导用户）。
 
 ### M5 — 设备操控（调研后新增，待排期）

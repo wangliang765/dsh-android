@@ -377,19 +377,37 @@ public class BridgeServer {
         respond(socket, 200, okObj().put("launched", true).put("packageName", pkg));
     }
 
-    /** Enumerate launchable apps: label + packageName, sorted by label. */
+    /**
+     * Enumerate launchable apps: label + packageName, sorted by label.
+     * Enumerate via getInstalledApplications (not queryIntentActivities): with
+     * QUERY_ALL_PACKAGES granted we see every installed package, and
+     * getLaunchIntentForPackage != null is the launchable filter. This also
+     * catches apps whose launcher entry sits outside the main HOME/DEFAULT
+     * set, which some ROMs omit from queryIntentActivities.
+     */
     private void handleAppList(Socket socket) throws Exception {
-        Intent probe = new Intent(Intent.ACTION_MAIN);
-        probe.addCategory(Intent.CATEGORY_LAUNCHER);
-        java.util.List<android.content.pm.ResolveInfo> infos =
-            owner.getPackageManager().queryIntentActivities(probe, 0);
+        android.content.pm.PackageManager pm = owner.getPackageManager();
+        java.util.List<android.content.pm.ApplicationInfo> installed =
+            pm.getInstalledApplications(0);
         java.util.TreeMap<String, String> byPackage = new java.util.TreeMap<>();
-        for (android.content.pm.ResolveInfo info : infos) {
-            String label;
-            try { label = String.valueOf(info.loadLabel(owner.getPackageManager())); }
-            catch (Throwable t) { label = info.activityInfo.packageName; }
-            if (!byPackage.containsKey(info.activityInfo.packageName)) {
+        if (installed == null || installed.isEmpty()) {
+            // PM gave us nothing at all: fall back to the legacy launcher-intent
+            // probe so we still return something.
+            Intent probe = new Intent(Intent.ACTION_MAIN);
+            probe.addCategory(Intent.CATEGORY_LAUNCHER);
+            for (android.content.pm.ResolveInfo info : pm.queryIntentActivities(probe, 0)) {
+                String label;
+                try { label = String.valueOf(info.loadLabel(pm)); }
+                catch (Throwable t) { label = info.activityInfo.packageName; }
                 byPackage.put(info.activityInfo.packageName, label);
+            }
+        } else {
+            for (android.content.pm.ApplicationInfo ai : installed) {
+                if (pm.getLaunchIntentForPackage(ai.packageName) == null) continue;
+                CharSequence labelCs = pm.getApplicationLabel(ai);
+                String label = labelCs != null ? labelCs.toString() : ai.packageName;
+                if (label.trim().isEmpty()) label = ai.packageName;
+                byPackage.put(ai.packageName, label);
             }
         }
         JSONArray apps = new JSONArray();
@@ -399,7 +417,25 @@ public class BridgeServer {
             app.put("label", entry.getValue());
             apps.put(app);
         }
-        respond(socket, 200, okObj().put("apps", apps).put("count", apps.length()));
+        // Package-visibility health report. Some OEM ROMs (ColorOS et al.) layer a
+        // second user-facing gate ("获取应用列表" appops) on top of manifest-level
+        // QUERY_ALL_PACKAGES: when it denies, getInstalledApplications collapses to
+        // near-self-only and launcher counts crater. Report the anomaly instead of
+        // silently returning a decimated list, so the model can guide the user.
+        int launchableFound = apps.length();
+        boolean restricted = launchableFound < 30; // healthy phones show well over 100
+        String hint = launchableFound <= 2
+            ? "应用列表几乎不可见（只看到 " + launchableFound + " 个）：包可见性被系统完全限制。"
+                + "请到 系统设置→应用→DSH→权限 打开「获取应用列表」（ColorOS 上 adb 也无法代开）。"
+            : (launchableFound < 30
+                ? "可见应用仅 " + launchableFound + " 个，明显偏少，疑似厂商限制。"
+                    + "请检查 系统设置→应用→DSH→权限 的「获取应用列表」是否开启。"
+                : null);
+        JSONObject out = okObj().put("apps", apps)
+            .put("count", launchableFound)
+            .put("visibilityRestricted", restricted);
+        if (hint != null) out.put("restrictionHint", hint);
+        respond(socket, 200, out);
     }
 
     /** Open a URL in the default (or named) browser via ACTION_VIEW. */
