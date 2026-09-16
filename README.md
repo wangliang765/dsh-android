@@ -40,7 +40,7 @@ scripts/             rebuild-payload.ps1 全链重建、build-apk.ps1 打包、p
 
 启动链：`libnode_dsh.so --expose-internals bin.js web --host 127.0.0.1 --port <N>`，就绪标志 `dsh web: http://127.0.0.1:<port>`；patch 经 `.dsh/profiles/web/cordis.patch.yml` 生效（`web` 子命令禁 `--patch`）。
 
-## 移植为什么难（六条硬约束，全部有实证）
+## 六条硬约束实证
 
 | # | 约束 | 后果 | 对策 |
 |---|---|---|---|
